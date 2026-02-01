@@ -34,6 +34,7 @@ export default function App() {
   const [readerState, setReaderState] = useState<ReaderState>(ReaderState.IDLE);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [selectedVoice, setSelectedVoice] = useState<string>('Kore');
+  const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isApiLoading, setIsApiLoading] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -53,6 +54,7 @@ export default function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isPlayingRef = useRef<boolean>(false);
   const nextChunkRef = useRef<() => void>(() => {});
+  const lastPlayedIndexRef = useRef<number | null>(null);
   // System TTS Ref
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const [isUsingSystemTTS, setIsUsingSystemTTS] = useState<boolean>(false);
@@ -343,6 +345,15 @@ export default function App() {
     // Initial theme setting now comes from user profile after login
     getSettings().then(setConfig);
     
+    // System TTS Voices setup
+    const updateVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      console.log(`[SystemTTS] Loaded ${voices.length} voices.`);
+      setSystemVoices(voices);
+    };
+    updateVoices();
+    window.speechSynthesis.onvoiceschanged = updateVoices;
+
     // Detect Mobile Device
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     console.log(`[App] Device detection: ${isMobile ? 'Mobile' : 'Desktop'}`);
@@ -548,7 +559,16 @@ export default function App() {
 
   const playCurrentChunk = useCallback(async () => {
     const chunk = chunks[currentChunkIndex];
-    if (!chunk) return;
+    if (!chunk || !chunk.text.trim()) {
+        if (chunk && !chunk.text.trim()) nextChunkRef.current();
+        return;
+    }
+
+    // Avoid double-playing the same chunk if it's already active
+    if (lastPlayedIndexRef.current === currentChunkIndex && readerState === ReaderState.PLAYING) {
+        return;
+    }
+    lastPlayedIndexRef.current = currentChunkIndex;
 
     // --- SYSTEM TTS PLAYBACK ---
     if (isUsingSystemTTS || !chunk.audioUrl) {
@@ -564,12 +584,11 @@ export default function App() {
         const utterance = new SpeechSynthesisUtterance(chunk.text);
         utterance.rate = playbackSpeed;
         
-        const voices = window.speechSynthesis.getVoices();
         const lang = detectLanguage(chunk.text);
         const prefix = lang === 'pl' ? 'pl' : 'en';
         
-        let voice = voices.find(v => v.lang.startsWith(prefix) && (v.name.includes("Google") || v.name.includes("Siri") || v.name.includes("Premium") || v.name.includes("Enhanced") || v.name.includes("Natural")));
-        if (!voice) voice = voices.find(v => v.lang.startsWith(prefix));
+        let voice = systemVoices.find(v => v.lang.startsWith(prefix) && (v.name.includes("Google") || v.name.includes("Siri") || v.name.includes("Premium") || v.name.includes("Enhanced") || v.name.includes("Natural")));
+        if (!voice) voice = systemVoices.find(v => v.lang.startsWith(prefix));
         
         if (voice) utterance.voice = voice;
 
@@ -647,7 +666,7 @@ export default function App() {
         };
         window.speechSynthesis.speak(fallbackUtterance);
     }
-  }, [chunks, currentChunkIndex, playbackSpeed, isUsingSystemTTS]);
+  }, [chunks, currentChunkIndex, playbackSpeed, isUsingSystemTTS, systemVoices, readerState]);
 
   useEffect(() => {
     const chunk = chunks[currentChunkIndex];
@@ -992,15 +1011,17 @@ export default function App() {
                     <div className="leading-relaxed text-lg text-gray-800 dark:text-gray-200 font-serif space-y-2 text-justify">
                         {pages[currentPageIndex].chunks.map((chunk, i) => {
                             const globalIndex = pages[currentPageIndex].startChunkIndex + i;
+                            // ALWAYS use fresh data from the 'chunks' state array
+                            const currentChunk = chunks[globalIndex] || chunk;
                             const isActive = globalIndex === currentChunkIndex;
-                            const isCached = chunk.status === 'ready';
-                            const isError = chunk.status === 'error';
+                            const isCached = currentChunk.status === 'ready' || !!currentChunk.audioUrl;
+                            const isError = currentChunk.status === 'error';
                             return (
                                 <span 
-                                    key={chunk.id}
+                                    key={currentChunk.id}
                                     onClick={() => {
                                         if (isError) {
-                                            setChunks(prev => prev.map(c => c.id === chunk.id ? { ...c, status: 'pending' } : c));
+                                            setChunks(prev => prev.map(c => c.id === currentChunk.id ? { ...c, status: 'pending' } : c));
                                             return;
                                         }
                                         if (globalIndex !== currentChunkIndex) {
@@ -1024,7 +1045,7 @@ export default function App() {
                                     `}
                                     title={isCached ? "Audio buffered" : isError ? "Error generating audio. Click to retry." : "Click to read"}
                                 >
-                                    {chunk.text + " "}
+                                    {currentChunk.text + " "}
                                 </span>
                             );
                         })}
