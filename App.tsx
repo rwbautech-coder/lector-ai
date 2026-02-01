@@ -205,14 +205,15 @@ export default function App() {
           setIsPlayingRef(false);
       }
 
-      if (autoPlay) {
+      // Force disable auto-play to ensure user interaction unlocks AudioContext on iOS
+      /* if (autoPlay) {
         setTimeout(() => {
             setReaderState(ReaderState.PLAYING);
             setIsPlayingRef(true);
         }, 800);
-      } else {
+      } else { */
         setReaderState(ReaderState.IDLE);
-      }
+      /* } */
   };
 
   const processContent = async (text: string, title: string, autoPlay: boolean = false) => {
