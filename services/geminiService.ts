@@ -36,12 +36,18 @@ export const generateSpeechFromText = async (
     const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
 
     if (!audioData) {
+      console.error("Gemini Response (No Audio):", JSON.stringify(response, null, 2));
       throw new Error("No audio data received from Gemini.");
     }
 
     return audioData;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error generating speech:", error);
+    if (process.env.API_KEY ? "Key Present" : "Key Missing");
+    
+    // Attempt to log more details if available
+    if (error.message) console.error("Error Message:", error.message);
+    
     throw error;
   }
 };

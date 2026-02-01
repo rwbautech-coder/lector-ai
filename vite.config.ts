@@ -43,7 +43,7 @@ export default defineConfig(({ mode }) => {
     define: {
       // This exposes process.env.API_KEY to the client-side code
       // Note: In production (GitHub Actions), this will be replaced by the secret value
-      'process.env.API_KEY': JSON.stringify(env.API_KEY)
+      'process.env.API_KEY': JSON.stringify(env.API_KEY || process.env.API_KEY)
     }
   };
 });
