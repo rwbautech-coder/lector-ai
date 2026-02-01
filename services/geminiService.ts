@@ -17,9 +17,15 @@ export const generateSpeechFromText = async (
   text: string,
   voiceName: string = 'Kore'
 ): Promise<string> => {
-  const ai = getGenAI();
-
+  console.log(`[GeminiService] Generating speech for text length: ${text?.length}, Voice: ${voiceName}`);
+  
   try {
+    const apiKey = process.env.API_KEY;
+    console.log(`[GeminiService] API Key Status: ${apiKey ? (apiKey.length > 5 ? apiKey.substring(0, 5) + '...' : 'Present (Short)') : 'Missing/Undefined'}`);
+    
+    const ai = getGenAI();
+    console.log(`[GeminiService] AI Client initialized.`);
+
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
       contents: [{ parts: [{ text: text }] }],
