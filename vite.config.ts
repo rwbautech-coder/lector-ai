@@ -43,7 +43,7 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       assetsDir: 'assets',
       sourcemap: false,
-      target: 'esnext' // Revert to esnext/es2020 to support BigInt literals
+      target: 'es2020' // Balanced target: supports BigInt but safer than esnext for iOS
     },
     define: {
       // This exposes process.env.API_KEY to the client-side code

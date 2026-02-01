@@ -604,6 +604,7 @@ export default function App() {
     audio.playbackRate = playbackSpeed;
     
     try {
+        console.log(`[Audio] Attempting to play chunk ${currentChunkIndex}:`, chunk.audioUrl);
         await audio.play();
         setReaderState(ReaderState.PLAYING);
         isPlayingRef.current = true;
