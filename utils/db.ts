@@ -18,6 +18,11 @@ export const initDB = (): Promise<IDBDatabase> => {
         bookStore.createIndex('userId', 'userId', { unique: false });
       }
 
+      // Store for Users (KeyPath: id)
+      if (!db.objectStoreNames.contains('users')) {
+        db.createObjectStore('users', { keyPath: 'id' });
+      }
+
       // Store for App Settings (KeyPath: id)
       if (!db.objectStoreNames.contains('settings')) {
         db.createObjectStore('settings', { keyPath: 'id' });
@@ -80,6 +85,28 @@ export const getSettings = async (): Promise<AppSettings> => {
     const store = transaction.objectStore('settings');
     const request = store.get('config');
     request.onsuccess = () => resolve(request.result || {});
+    request.onerror = () => reject(request.error);
+  });
+};
+
+export const saveUser = async (user: UserProfile): Promise<void> => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['users'], 'readwrite');
+    const store = transaction.objectStore('users');
+    const request = store.put(user);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};
+
+export const getUser = async (userId: string): Promise<UserProfile | undefined> => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(['users'], 'readonly');
+    const store = transaction.objectStore('users');
+    const request = store.get(userId);
+    request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 };

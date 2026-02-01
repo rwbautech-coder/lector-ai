@@ -37,6 +37,10 @@ export interface UserProfile {
   avatarColor: string;
   email?: string; // Connected Google Email
   googleToken?: string; // Access Token
+  // User-specific settings
+  playbackSpeed: number;
+  selectedVoice: string;
+  isDarkMode: boolean;
 }
 
 export interface Book {
@@ -64,8 +68,8 @@ export const AVAILABLE_VOICES: VoiceConfig[] = [
 ];
 
 export const PREDEFINED_USERS: UserProfile[] = [
-  { id: '1', name: 'Grzegorz', avatarColor: 'bg-blue-500' },
-  { id: '2', name: 'Magda', avatarColor: 'bg-pink-500' },
-  { id: '3', name: 'Natalia', avatarColor: 'bg-purple-500' },
-  { id: '4', name: 'Marcel', avatarColor: 'bg-green-500' },
+  { id: '1', name: 'Grzegorz', avatarColor: 'bg-blue-500', playbackSpeed: 1.0, selectedVoice: 'Kore', isDarkMode: true },
+  { id: '2', name: 'Magda', avatarColor: 'bg-pink-500', playbackSpeed: 1.0, selectedVoice: 'Kore', isDarkMode: true },
+  { id: '3', name: 'Natalia', avatarColor: 'bg-purple-500', playbackSpeed: 1.0, selectedVoice: 'Kore', isDarkMode: true },
+  { id: '4', name: 'Marcel', avatarColor: 'bg-green-500', playbackSpeed: 1.0, selectedVoice: 'Kore', isDarkMode: true },
 ];

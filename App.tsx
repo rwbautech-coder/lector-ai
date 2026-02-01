@@ -7,7 +7,7 @@ import { extractTextFromPdf } from './utils/pdfUtils';
 import { Visualizer } from './components/Visualizer';
 import { Controls } from './components/Controls';
 import { LoginScreen } from './components/LoginScreen';
-import { saveBookToLocal, getBooksForUser, saveSettings, getSettings } from './utils/db';
+import { saveBookToLocal, getBooksForUser, saveSettings, getSettings, saveUser, getUser } from './utils/db';
 import { initGapiClient, initGisClient, handleGoogleLogin, saveBookToDrive, syncBooksWithDrive } from './services/googleDriveService';
 
 export default function App() {
@@ -57,10 +57,22 @@ export default function App() {
   // --- HELPER FOR LOGIN ---
   // Defined before usage in useEffect
   const performLogin = async (user: UserProfile, isAuto: boolean = false) => {
-    // Save for next time
-    localStorage.setItem('lector_last_user_id', user.id);
+    // Try to load user profile from DB, or use the passed one (predefined user)
+    let loadedUser = await getUser(user.id);
+    if (!loadedUser) {
+        // If not in DB, save the initial user (e.g., from PREDEFINED_USERS) to DB
+        loadedUser = { ...user };
+        await saveUser(loadedUser);
+    }
     
-    setCurrentUser(user);
+    // Set current user and his settings
+    setCurrentUser(loadedUser);
+    setPlaybackSpeed(loadedUser.playbackSpeed);
+    setSelectedVoice(loadedUser.selectedVoice);
+    setIsDarkMode(loadedUser.isDarkMode);
+
+    localStorage.setItem('lector_last_user_id', user.id); // Save for next time auto-login
+    
     const books = await getBooksForUser(user.id);
     setMyBooks(books);
     
@@ -73,8 +85,7 @@ export default function App() {
   // --- INITIALIZATION ---
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('lector_theme');
-    if (savedTheme) setIsDarkMode(savedTheme === 'dark');
+    // Initial theme setting now comes from user profile after login
     getSettings().then(setConfig);
 
     // PWA Install Event Listener
@@ -83,36 +94,51 @@ export default function App() {
       setInstallPrompt(e);
     });
 
-    // Check for automation query params (Deep Linking)
+    // Load all users from DB and merge with PREDEFINED_USERS
+    const loadAllUsers = async () => {
+        const initialUsers: UserProfile[] = [];
+        for (const preUser of PREDEFINED_USERS) {
+            const dbUser = await getUser(preUser.id);
+            initialUsers.push(dbUser || preUser); // Use DB user if exists, else predefined
+        }
+        setUsers(initialUsers);
+
+        // Check for auto-login after loading all users
+        const lastUserId = localStorage.getItem('lector_last_user_id');
+        if (lastUserId) {
+            const userToLogin = initialUsers.find(u => u.id === lastUserId);
+            if (userToLogin) {
+                console.log("Auto-logging in user:", userToLogin.name);
+                // No auto-read URL at this stage. Logic moved to separate useEffect.
+                performLogin(userToLogin, false); 
+            }
+        }
+    };
+    loadAllUsers();
+
+    // Deep Linking check remains here, but auto-login is now in loadAllUsers
     const params = new URLSearchParams(window.location.search);
     const readUrl = params.get('read') || params.get('url') || params.get('import');
-    
     if (readUrl) {
       console.log("Found auto-read URL:", readUrl);
       setPendingAutoReadUrl(readUrl);
-
-      // --- AUTO LOGIN LOGIC ---
-      // If a URL is present, try to log in the last user automatically
-      const lastUserId = localStorage.getItem('lector_last_user_id');
-      if (lastUserId) {
-        const user = PREDEFINED_USERS.find(u => u.id === lastUserId);
-        if (user) {
-            console.log("Auto-logging in user:", user.name);
-            performLogin(user, true); 
-        }
-      }
     }
   }, []);
 
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
-      localStorage.setItem('lector_theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
-      localStorage.setItem('lector_theme', 'light');
     }
   }, [isDarkMode]);
+
+  // Sync `isDarkMode` state based on `currentUser`
+  useEffect(() => {
+    if (currentUser) {
+        setIsDarkMode(currentUser.isDarkMode);
+    }
+  }, [currentUser]);
 
   // Init Google Services
   useEffect(() => {
@@ -132,7 +158,7 @@ export default function App() {
       };
       initGoogle();
     }
-  }, [config]);
+  }, [config, currentUser]); // Added currentUser to dependencies for potential re-init on user change
 
   // --- AUTOMATION EFFECT ---
   useEffect(() => {
@@ -147,6 +173,28 @@ export default function App() {
       window.history.pushState({path: newUrl}, '', newUrl);
     }
   }, [currentUser, pendingAutoReadUrl, isProcessingFile, currentBook]);
+
+  // --- SAVE USER SETTINGS ---
+  useEffect(() => {
+    if (currentUser) {
+      const updatedUser: UserProfile = {
+        ...currentUser,
+        playbackSpeed: playbackSpeed,
+        selectedVoice: selectedVoice,
+        isDarkMode: isDarkMode
+      };
+      // Only save if settings actually changed to avoid infinite loops
+      if (
+        currentUser.playbackSpeed !== playbackSpeed ||
+        currentUser.selectedVoice !== selectedVoice ||
+        currentUser.isDarkMode !== isDarkMode
+      ) {
+        setCurrentUser(updatedUser); // Update currentUser state
+        saveUser(updatedUser); // Persist to DB
+      }
+    }
+  }, [playbackSpeed, selectedVoice, isDarkMode, currentUser]);
+
 
   // --- BUFFERING LOGIC ---
   useEffect(() => {
@@ -185,9 +233,13 @@ export default function App() {
     const newUser: UserProfile = {
       id: Date.now().toString(),
       name,
-      avatarColor: 'bg-indigo-500'
+      avatarColor: 'bg-indigo-500',
+      playbackSpeed: 1.0, // Default for new users
+      selectedVoice: 'Kore', // Default for new users
+      isDarkMode: true // Default for new users
     };
     setUsers([...users, newUser]);
+    saveUser(newUser); // Save new user to DB
   };
 
   const connectGoogle = () => {
