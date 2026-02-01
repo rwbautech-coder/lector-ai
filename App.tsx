@@ -333,10 +333,18 @@ export default function App() {
     // Initial theme setting now comes from user profile after login
     getSettings().then(setConfig);
     
+    // Detect Mobile Device
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
     // Start warming up models
     setTimeout(() => {
-        initKokoro().catch(e => console.log("Kokoro init deferred/failed", e));
-        initPiper().catch(e => console.log("Piper init deferred/failed", e));
+        if (isMobile) {
+             console.log("Mobile device detected. Skipping AI TTS init, forcing System TTS.");
+             setIsUsingSystemTTS(true);
+        } else {
+            initKokoro().catch(e => console.error("Kokoro init deferred/failed", e));
+            initPiper().catch(e => console.error("Piper init deferred/failed", e));
+        }
     }, 1000);
 
     // PWA Install Event Listener
