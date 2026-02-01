@@ -4,6 +4,21 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
+// Helper to clean text from citations, footnotes, and URLs for better TTS experience
+const cleanText = (text: string): string => {
+  return text
+    // Remove citation markers like [1], [12], [3-5]
+    .replace(/\[\d+(?:-\d+)?\]/g, '')
+    // Remove URLs
+    .replace(/(?:https?|ftp):\/\/[\n\S]+/g, '')
+    // Remove "www." links
+    .replace(/www\.[\n\S]+/g, '')
+    // Remove standalone page numbers often found at start/end of pages (heuristic: purely numeric lines or chunks)
+    // This is hard on a continuous string, but we can try to catch isolated numbers surrounded by spaces
+    // .replace(/\s+\d+\s+/g, ' ') // Too risky for dates/years
+    .trim();
+};
+
 export const extractTextFromPdf = async (source: Blob): Promise<string> => {
   try {
     const arrayBuffer = await source.arrayBuffer();
@@ -26,9 +41,12 @@ export const extractTextFromPdf = async (source: Blob): Promise<string> => {
         .map((item: any) => item.str)
         .join(' ');
       
+      // Clean the extracted text
+      const cleanedPageText = cleanText(pageText);
+
       // Basic heuristic: if the page text is very short, it might be a blank page or just an image
-      if (pageText.trim().length > 0) {
-          fullText += pageText + '\n\n';
+      if (cleanedPageText.length > 0) {
+          fullText += cleanedPageText + '\n\n';
       }
     }
 
