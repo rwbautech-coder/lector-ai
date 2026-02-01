@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.39.0",
+    "intl-segmenter-polyfill": "^0.4.4",
     "kokoro-js": "^1.2.1",
     "lucide-react": "^0.563.0",
     "onnxruntime-web": "^1.23.2",
