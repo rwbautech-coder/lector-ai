@@ -61,10 +61,7 @@ export interface AppSettings {
 // Available voices in Gemini 2.5
 export const AVAILABLE_VOICES: VoiceConfig[] = [
   { name: 'Kore (Female - Balanced)', id: 'Kore' },
-  { name: 'Puck (Male - Balanced)', id: 'Puck' },
   { name: 'Fenrir (Male - Deep)', id: 'Fenrir' },
-  { name: 'Charon (Male - Authoritative)', id: 'Charon' },
-  { name: 'Zephyr (Female - Soft)', id: 'Zephyr' },
 ];
 
 export const PREDEFINED_USERS: UserProfile[] = [
