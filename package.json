@@ -10,7 +10,9 @@
     "fix-deps": "rm -rf node_modules package-lock.json && npm install"
   },
   "dependencies": {
+    "@diffusionstudio/piper-wasm": "^1.0.0",
     "@google/genai": "^1.39.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
     "intl-segmenter-polyfill": "^0.4.4",
     "kokoro-js": "^1.2.1",
     "lucide-react": "^0.563.0",
