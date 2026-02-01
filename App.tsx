@@ -4,6 +4,7 @@ import { AVAILABLE_VOICES, TextChunk, ReaderState, UserProfile, PREDEFINED_USERS
 import { generateSpeechKokoro, initKokoro } from './services/kokoroService';
 import { chunkText, organizePages } from './utils/audioUtils';
 import { extractTextFromPdf } from './utils/pdfUtils';
+import { detectLanguage } from './utils/textUtils';
 import { Visualizer } from './components/Visualizer';
 import { Controls } from './components/Controls';
 import { LoginScreen } from './components/LoginScreen';
@@ -325,6 +326,11 @@ export default function App() {
 
   const processContent = async (text: string, title: string, autoPlay: boolean = false) => {
       if (!currentUser) return;
+      
+      const lang = detectLanguage(text);
+      if (lang === 'pl') {
+          setError("⚠️ Detected Polish text. Kokoro TTS supports only English and may read with a strong accent.");
+      }
       
       const newBook: Book = {
          id: `${title.substring(0, 20).replace(/\s+/g, '_')}_${Date.now()}`,

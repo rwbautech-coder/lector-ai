@@ -60,11 +60,11 @@ export interface AppSettings {
 
 // Available voices in Kokoro TTS (Local)
 export const AVAILABLE_VOICES: VoiceConfig[] = [
-  { name: 'Heart (Female - US)', id: 'Kore' },        // Maps to af_heart
-  { name: 'Adam (Male - US)', id: 'Fenrir' },         // Maps to am_adam
-  { name: 'Bella (Female - US)', id: 'Zephyr' },      // Maps to af_bella
-  { name: 'Michael (Male - US)', id: 'Puck' },        // Maps to am_michael
-  { name: 'George (Male - UK)', id: 'Charon' },       // Maps to bm_george
+  { name: 'Heart (Female - US, English Only)', id: 'Kore' },
+  { name: 'Adam (Male - US, English Only)', id: 'Fenrir' },
+  { name: 'Bella (Female - US, English Only)', id: 'Zephyr' },
+  { name: 'Michael (Male - US, English Only)', id: 'Puck' },
+  { name: 'George (Male - UK, English Only)', id: 'Charon' },
 ];
 
 export const PREDEFINED_USERS: UserProfile[] = [
