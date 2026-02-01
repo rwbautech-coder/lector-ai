@@ -42,7 +42,8 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       assetsDir: 'assets',
-      sourcemap: false
+      sourcemap: false,
+      target: 'esnext' // Revert to esnext/es2020 to support BigInt literals
     },
     define: {
       // This exposes process.env.API_KEY to the client-side code
