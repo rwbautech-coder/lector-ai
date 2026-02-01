@@ -203,7 +203,7 @@ export const syncBooksWithDrive = async (localBooks: Book[]): Promise<Book[]> =>
 
   // Check for books that are local but not in cloud -> push to cloud
   for (const localBook of localBooks) {
-     const existsInDrive = driveFiles.some(f => f.name === `${localBook.id}.json`);
+     const existsInDrive = driveFiles.some((f: any) => f.name === `${localBook.id}.json`);
      if (!existsInDrive) {
         await saveBookToDrive(localBook);
      }
