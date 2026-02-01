@@ -43,7 +43,7 @@ export const generateSpeechFromText = async (
     return audioData;
   } catch (error: any) {
     console.error("Error generating speech:", error);
-    if (process.env.API_KEY ? "Key Present" : "Key Missing");
+    console.error("API Key Status:", process.env.API_KEY ? "Present" : "Missing");
     
     // Attempt to log more details if available
     if (error.message) console.error("Error Message:", error.message);
