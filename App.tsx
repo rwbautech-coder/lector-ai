@@ -223,11 +223,12 @@ export default function App() {
 
     for (let i = currentChunkIndex; i < endIndex; i++) {
         const chunk = chunks[i];
+        // Don't retry if it's already in error state (unless manually retried)
         if (chunk && chunk.status === 'pending' && !chunk.audioUrl) {
             bufferChunk(i);
         }
     }
-
+    // ... backward buffering omitted for brevity, logic applies similarly if updated fully
     for (let i = currentChunkIndex - 1; i >= startIndex; i--) {
         const chunk = chunks[i];
         if (chunk && chunk.status === 'pending' && !chunk.audioUrl) {
@@ -236,9 +237,28 @@ export default function App() {
     }
 
   }, [currentChunkIndex, chunks, selectedVoice]);
+  
+  // ... (inside bufferChunk function)
+        (async () => {
+            try {
+                if (index === currentChunkIndex) setIsApiLoading(true);
 
+                const base64Pcm = await generateSpeechFromText(chunk.text, selectedVoice);
+                const pcmData = base64ToPcm(base64Pcm);
+                const wavBlob = createWavBlob(pcmData);
+                const audioUrl = URL.createObjectURL(wavBlob);
 
-  // --- USER LOGIC ---
+                setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'ready', audioUrl } : c));
+            } catch (err) {
+                console.error(`Error buffering chunk ${index}`, err);
+                // Set to 'error' so we don't loop infinitely
+                setError(index === currentChunkIndex ? "Failed to generate audio. Check API Key or quota." : null);
+                setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'error' } : c));
+            } finally {
+                if (index === currentChunkIndex) setIsApiLoading(false);
+            }
+        })();
+  // ...
 
   const handleLogin = (user: UserProfile) => {
     performLogin(user, false);
@@ -569,7 +589,7 @@ export default function App() {
             } catch (err) {
                 console.error(`Error buffering chunk ${index}`, err);
                 setError(index === currentChunkIndex ? "Failed to generate audio." : null);
-                setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'pending' } : c));
+                setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'error' } : c));
             } finally {
                 if (index === currentChunkIndex) setIsApiLoading(false);
             }
@@ -918,10 +938,16 @@ export default function App() {
                             const globalIndex = pages[currentPageIndex].startChunkIndex + i;
                             const isActive = globalIndex === currentChunkIndex;
                             const isCached = chunk.status === 'ready';
+                            const isError = chunk.status === 'error';
                             return (
                                 <span 
                                     key={chunk.id}
                                     onClick={() => {
+                                        if (isError) {
+                                            // Manual retry
+                                            setChunks(prev => prev.map(c => c.id === chunk.id ? { ...c, status: 'pending' } : c));
+                                            return;
+                                        }
                                         if (globalIndex !== currentChunkIndex) {
                                             if (audioRef.current) audioRef.current.pause();
                                             isPlayingRef.current = false;
@@ -935,8 +961,9 @@ export default function App() {
                                             ? 'bg-yellow-200/50 dark:bg-yellow-500/30 text-gray-900 dark:text-white font-medium' 
                                             : 'hover:bg-gray-100 dark:hover:bg-white/5'}
                                         ${!isActive && isCached ? 'underline decoration-green-500/20 decoration-2' : ''}
+                                        ${isError ? 'underline decoration-red-500 decoration-wavy text-red-700 dark:text-red-400' : ''}
                                     `}
-                                    title={isCached ? "Audio buffered" : "Click to read"}
+                                    title={isCached ? "Audio buffered" : isError ? "Error generating audio. Click to retry." : "Click to read"}
                                 >
                                     {chunk.text + " "}
                                 </span>

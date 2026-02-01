@@ -1,7 +1,7 @@
 export interface TextChunk {
   id: number;
   text: string;
-  status: 'pending' | 'generating' | 'ready' | 'playing' | 'completed';
+  status: 'pending' | 'generating' | 'ready' | 'playing' | 'completed' | 'error';
   audioUrl?: string; // Blob URL for HTMLAudioElement
 }
 
