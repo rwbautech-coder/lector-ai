@@ -58,34 +58,82 @@ export default function App() {
   // Track PWA install prompt
   const [installPrompt, setInstallPrompt] = useState<any>(null);
 
-  // --- HELPER FOR LOGIN ---
-  // Defined before usage in useEffect
+  // --- HELPER FUNCTIONS (DEFINED BEFORE USE) ---
+
+  const saveProgressToCloud = async () => {
+     if (isDriveConnected && currentBook && currentUser) {
+         await saveBookToDrive(currentBook);
+     }
+  };
+
+  const updateProgress = async (index: number) => {
+     if (!currentUser || !currentBook) return;
+     
+     const updatedBook = {
+        ...currentBook,
+        currentChunkIndex: index,
+        lastRead: Date.now(),
+        lastModified: Date.now()
+     };
+     setCurrentBook(updatedBook);
+     await saveBookToLocal(currentUser.id, updatedBook);
+  };
+
+  const triggerSync = async (userId: string) => {
+     if (!isDriveConnected) return;
+     setIsSyncing(true);
+     try {
+       const localBooks = await getBooksForUser(userId);
+       const syncedBooks = await syncBooksWithDrive(localBooks);
+       for (const b of syncedBooks) {
+         await saveBookToLocal(userId, b);
+       }
+       setMyBooks(syncedBooks);
+     } catch (e) {
+       console.error("Sync failed", e);
+     } finally {
+       setIsSyncing(false);
+     }
+  };
+
+  const initAudio = () => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio();
+      audioRef.current.preservesPitch = true;
+      audioRef.current.onended = () => {
+        if (isPlayingRef.current) nextChunk();
+      };
+      audioRef.current.onerror = () => {
+        // Handle error by stopping or skipping
+        console.error("Audio playback error");
+        setIsPlayingRef.current = false;
+        setReaderState(ReaderState.IDLE);
+      };
+    }
+  };
+
   const performLogin = async (user: UserProfile, isAuto: boolean = false) => {
     try {
-      // Try to load user profile from DB, or use the passed one (predefined user)
       let loadedUser = await getUser(user.id);
       if (!loadedUser) {
-          // If not in DB, save the initial user (e.g., from PREDEFINED_USERS) to DB
           loadedUser = { ...user };
           await saveUser(loadedUser);
       }
       
-      // Set current user and his settings
       setCurrentUser(loadedUser);
-      setPlaybackSpeed(loadedUser.playbackSpeed ?? 1.3); // Fallback if undefined
+      setPlaybackSpeed(loadedUser.playbackSpeed ?? 1.3);
       setSelectedVoice(loadedUser.selectedVoice || 'Kore');
       setIsDarkMode(loadedUser.isDarkMode ?? true);
 
     } catch (dbError) {
-      console.error("Database error during login (likely iOS private mode or quota issue):", dbError);
-      // Fallback: Login with the provided user object in memory only
+      console.error("Database error during login:", dbError);
       setCurrentUser(user);
       setPlaybackSpeed(user.playbackSpeed ?? 1.3);
       setSelectedVoice(user.selectedVoice || 'Kore');
       setIsDarkMode(user.isDarkMode ?? true);
     }
 
-    localStorage.setItem('lector_last_user_id', user.id); // Save for next time auto-login
+    localStorage.setItem('lector_last_user_id', user.id);
     
     try {
       const books = await getBooksForUser(user.id);
@@ -95,43 +143,151 @@ export default function App() {
       setMyBooks([]);
     }
     
-    // Only show library if we are NOT about to auto-import a book
     if (!isAuto && !pendingAutoReadUrl) {
       setShowLibrary(true); 
     }
   };
 
-  // --- INITIALIZATION ---
+  const loadBook = (book: Book, autoPlay: boolean = false) => {
+      setCurrentBook(book);
+      
+      const rawChunks = chunkText(book.content, 500);
+      const textChunks: TextChunk[] = rawChunks.map((t, i) => ({
+          id: i,
+          text: t,
+          status: 'pending'
+      }));
+      setChunks(textChunks);
+
+      const { pages, chapters } = organizePages(textChunks);
+      setPages(pages);
+      setChapters(chapters);
+
+      const startChunk = book.currentChunkIndex || 0;
+      setCurrentChunkIndex(startChunk);
+      
+      const initialPage = pages.findIndex(p => startChunk >= p.startChunkIndex && startChunk <= p.endChunkIndex);
+      setCurrentPageIndex(initialPage !== -1 ? initialPage : 0);
+
+      setShowLibrary(false);
+      setShowChapters(false);
+
+      if (audioRef.current) {
+          audioRef.current.pause();
+          isPlayingRef.current = false;
+      }
+
+      if (autoPlay) {
+        setTimeout(() => {
+            setReaderState(ReaderState.PLAYING);
+            isPlayingRef.current = true;
+        }, 800);
+      } else {
+        setReaderState(ReaderState.IDLE);
+      }
+  };
+
+  const processContent = async (text: string, title: string, autoPlay: boolean = false) => {
+      if (!currentUser) return;
+      
+      const lang = detectLanguage(text);
+      if (lang === 'pl') {
+          setError("⚠️ Detected Polish text. Kokoro TTS supports only English and may read with a strong accent.");
+      }
+
+      const newBook: Book = {
+         id: `${title.substring(0, 20).replace(/\s+/g, '_')}_${Date.now()}`,
+         title: title,
+         content: text,
+         lastRead: Date.now(),
+         currentChunkIndex: 0,
+         totalChunks: 0, 
+         lastModified: Date.now()
+      };
+      
+      await saveBookToLocal(currentUser.id, newBook);
+      setMyBooks(prev => [newBook, ...prev]);
+      if (isDriveConnected) saveBookToDrive(newBook);
+
+      loadBook(newBook, autoPlay);
+  };
+
+  const importContentFromUrl = async (url: string, autoPlay: boolean = false) => {
+    if (!url.trim() || !currentUser) return;
+    
+    setIsProcessingFile(true);
+    setError(null);
+    setShowUrlInput(false);
+
+    try {
+      let response;
+      let usedUrl = url;
+      
+      try {
+          response = await fetch(url);
+          if (!response.ok) throw new Error("Direct fetch failed");
+      } catch (directError) {
+          console.log("Direct fetch failed. Trying Proxy...");
+          usedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+          response = await fetch(usedUrl);
+      }
+
+      if (!response.ok) throw new Error(`Failed to fetch URL: ${response.statusText}`);
+      
+      const contentType = response.headers.get('content-type') || '';
+      const blob = await response.blob();
+      let text = '';
+      
+      let filename = url.split('/').pop() || 'Downloaded Content';
+      if (filename.includes('?')) filename = filename.split('?')[0];
+      if (filename.length > 30) filename = filename.substring(0, 30);
+      filename = decodeURIComponent(filename);
+
+      if (contentType.includes('pdf') || url.toLowerCase().endsWith('.pdf')) {
+        text = await extractTextFromPdf(blob);
+      } else {
+        text = await blob.text();
+      }
+
+      if (!text || text.trim().length === 0) {
+        throw new Error("Content appears empty or unsupported format.");
+      }
+
+      await processContent(text, filename, autoPlay);
+
+    } catch (err: any) {
+      console.error(err);
+      setError(`Import failed: ${err.message}. If the link is private or blocks proxies, please download the file and upload it manually.`);
+      setShowLibrary(true);
+    } finally {
+      setIsProcessingFile(false);
+    }
+  };
+
+  // --- INITIALIZATION EFFECTS ---
 
   useEffect(() => {
-    // Initial theme setting now comes from user profile after login
     getSettings().then(setConfig);
     
-    // Start warming up the AI Model (Kokoro) with a slight delay to not block UI thread on mobile
     setTimeout(() => {
         initKokoro().catch(err => console.error("Failed to warm up Kokoro:", err));
     }, 1000);
 
-    // PWA Install Event Listener
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       setInstallPrompt(e);
     });
 
-    // Load all users from DB and merge with PREDEFINED_USERS
     const loadAllUsers = async () => {
         const initialUsers: UserProfile[] = [];
         for (const preUser of PREDEFINED_USERS) {
             const dbUser = await getUser(preUser.id);
-            initialUsers.push(dbUser || preUser); // Use DB user if exists, else predefined
+            initialUsers.push(dbUser || preUser);
         }
         setUsers(initialUsers);
-
-        // Auto-login removed per user request. User must always select profile.
     };
     loadAllUsers();
 
-    // Deep Linking check remains here, but auto-login is now in loadAllUsers
     const params = new URLSearchParams(window.location.search);
     const readUrl = params.get('read') || params.get('url') || params.get('import');
     if (readUrl) {
@@ -148,14 +304,12 @@ export default function App() {
     }
   }, [isDarkMode]);
 
-  // Sync `isDarkMode` state based on `currentUser`
   useEffect(() => {
     if (currentUser) {
         setIsDarkMode(currentUser.isDarkMode);
     }
   }, [currentUser]);
 
-  // Init Google Services
   useEffect(() => {
     if (config.googleApiKey && config.googleClientId) {
       const initGoogle = async () => {
@@ -173,23 +327,19 @@ export default function App() {
       };
       initGoogle();
     }
-  }, [config, currentUser]); // Added currentUser to dependencies for potential re-init on user change
+  }, [config, currentUser]);
 
-  // --- AUTOMATION EFFECT ---
   useEffect(() => {
-    // If user is logged in and we have a pending URL, process it immediately
     if (currentUser && pendingAutoReadUrl && !isProcessingFile && !currentBook) {
       const urlToProcess = pendingAutoReadUrl;
-      setPendingAutoReadUrl(null); // Clear it so we don't loop
-      importContentFromUrl(urlToProcess, true); // true = autoPlay
+      setPendingAutoReadUrl(null); 
+      importContentFromUrl(urlToProcess, true); 
       
-      // Clean URL without reloading page
       const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
       window.history.pushState({path: newUrl}, '', newUrl);
     }
   }, [currentUser, pendingAutoReadUrl, isProcessingFile, currentBook]);
 
-  // --- SAVE USER SETTINGS ---
   useEffect(() => {
     if (currentUser) {
       const updatedUser: UserProfile = {
@@ -198,50 +348,36 @@ export default function App() {
         selectedVoice: selectedVoice,
         isDarkMode: isDarkMode
       };
-      // Only save if settings actually changed to avoid infinite loops
       if (
         currentUser.playbackSpeed !== playbackSpeed ||
         currentUser.selectedVoice !== selectedVoice ||
         currentUser.isDarkMode !== isDarkMode
       ) {
-        setCurrentUser(updatedUser); // Update currentUser state
-        saveUser(updatedUser); // Persist to DB
+        setCurrentUser(updatedUser); 
+        saveUser(updatedUser);
       }
     }
   }, [playbackSpeed, selectedVoice, isDarkMode, currentUser]);
 
+  // --- AUDIO LOGIC ---
 
-  // --- BUFFERING LOGIC ---
-  useEffect(() => {
-    if (!currentBook || chunks.length === 0) return;
-
-    const BUFFER_BACK = 2;
-    const BUFFER_FORWARD = 5;
-
-    const startIndex = Math.max(0, currentChunkIndex - BUFFER_BACK);
-    const endIndex = Math.min(chunks.length, currentChunkIndex + BUFFER_FORWARD);
-
-    for (let i = currentChunkIndex; i < endIndex; i++) {
-        const chunk = chunks[i];
-        // Don't retry if it's already in error state (unless manually retried)
-        if (chunk && chunk.status === 'pending' && !chunk.audioUrl) {
-            bufferChunk(i);
+  const nextChunk = () => {
+    setCurrentChunkIndex(prev => {
+        const next = prev + 1;
+        if (next >= chunks.length) {
+            setReaderState(ReaderState.IDLE);
+            isPlayingRef.current = false;
+            saveProgressToCloud();
+            return prev;
         }
-    }
-    // ... backward buffering omitted for brevity, logic applies similarly if updated fully
-    for (let i = currentChunkIndex - 1; i >= startIndex; i--) {
-        const chunk = chunks[i];
-        if (chunk && chunk.status === 'pending' && !chunk.audioUrl) {
-            bufferChunk(i);
-        }
-    }
+        updateProgress(next);
+        return next;
+    });
+  };
 
-  }, [currentChunkIndex, chunks, selectedVoice, isUsingSystemTTS]);
-  
   const bufferChunk = useCallback(async (index: number) => {
     if (index >= chunks.length || index < 0) return;
     
-    // If using system TTS, we don't need to buffer audio files. Just mark as ready.
     if (isUsingSystemTTS) {
        setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'ready' } : c));
        return;
@@ -265,11 +401,9 @@ export default function App() {
         setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'ready', audioUrl } : c));
     } catch (err) {
         console.error(`Error buffering chunk ${index}`, err);
-        // Fallback to System TTS on failure
         console.warn("Kokoro failed, switching to System TTS fallback.");
         setIsUsingSystemTTS(true);
-        setError(null); // Clear error as we have a backup
-        // Mark current and future as ready (since system TTS doesn't need buffering)
+        setError(null); 
         setChunks(prev => prev.map((c, i) => i >= index ? { ...c, status: 'ready' } : c));
     } finally {
         if (index === currentChunkIndex) setIsApiLoading(false);
@@ -277,7 +411,29 @@ export default function App() {
 
   }, [chunks, selectedVoice, currentChunkIndex, isUsingSystemTTS]);
 
-  // --- PLAYBACK LOGIC ---
+  useEffect(() => {
+    if (!currentBook || chunks.length === 0) return;
+
+    const BUFFER_BACK = 2;
+    const BUFFER_FORWARD = 5;
+
+    const startIndex = Math.max(0, currentChunkIndex - BUFFER_BACK);
+    const endIndex = Math.min(chunks.length, currentChunkIndex + BUFFER_FORWARD);
+
+    for (let i = currentChunkIndex; i < endIndex; i++) {
+        const chunk = chunks[i];
+        if (chunk && chunk.status === 'pending' && !chunk.audioUrl) {
+            bufferChunk(i);
+        }
+    }
+    for (let i = currentChunkIndex - 1; i >= startIndex; i--) {
+        const chunk = chunks[i];
+        if (chunk && chunk.status === 'pending' && !chunk.audioUrl) {
+            bufferChunk(i);
+        }
+    }
+
+  }, [currentChunkIndex, chunks, selectedVoice, isUsingSystemTTS, bufferChunk]);
 
   const playCurrentChunk = useCallback(async () => {
     const chunk = chunks[currentChunkIndex];
@@ -285,16 +441,13 @@ export default function App() {
 
     // --- SYSTEM TTS PLAYBACK ---
     if (isUsingSystemTTS || !chunk.audioUrl) {
-        // Cancel any ongoing system speech
         window.speechSynthesis.cancel();
 
         const utterance = new SpeechSynthesisUtterance(chunk.text);
         utterance.rate = playbackSpeed;
         
-        // Try to select a voice matching the language (PL or EN)
         const voices = window.speechSynthesis.getVoices();
         const lang = detectLanguage(chunk.text);
-        // Simple voice selection heuristic
         const voice = voices.find(v => v.lang.startsWith(lang === 'pl' ? 'pl' : 'en'));
         if (voice) utterance.voice = voice;
 
@@ -305,9 +458,8 @@ export default function App() {
         };
         utterance.onerror = (e) => {
             console.error("System TTS Error:", e);
-            // Ignore interruption errors
             if (e.error !== 'interrupted') {
-                 setIsPlayingRef(false); // Stop on real error
+                 isPlayingRef.current = false;
                  setReaderState(ReaderState.IDLE);
             }
         };
@@ -316,7 +468,7 @@ export default function App() {
         window.speechSynthesis.speak(utterance);
         
         setReaderState(ReaderState.PLAYING);
-        setIsPlayingRef(true);
+        isPlayingRef.current = true;
         setChunks(prev => prev.map((c, i) => i === currentChunkIndex ? { ...c, status: 'playing' } : c));
         return;
     }
@@ -336,21 +488,15 @@ export default function App() {
         console.log(`[Audio] Attempting to play chunk ${currentChunkIndex}:`, chunk.audioUrl);
         await audio.play();
         setReaderState(ReaderState.PLAYING);
-        setIsPlayingRef(true);
+        isPlayingRef.current = true;
         setChunks(prev => prev.map((c, i) => i === currentChunkIndex ? { ...c, status: 'playing' } : c));
     } catch (e) {
         console.warn("Auto-play blocked or audio failed", e);
-        // Fallback to System TTS if audio file fails to play
         console.warn("Audio file playback failed, switching to System TTS.");
         setIsUsingSystemTTS(true);
-        playCurrentChunk(); // Retry with system TTS immediately
+        playCurrentChunk(); 
     }
   }, [chunks, currentChunkIndex, playbackSpeed, bufferChunk, isUsingSystemTTS]);
-
-  // Helper to update ref state (since we use it in callbacks)
-  const setIsPlayingRef = (val: boolean) => {
-      isPlayingRef.current = val;
-  }
 
   useEffect(() => {
     if (isPlayingRef.current && chunks[currentChunkIndex]?.status === 'ready') {
@@ -358,24 +504,18 @@ export default function App() {
     }
   }, [chunks, currentChunkIndex, isPlayingRef.current, playCurrentChunk]);
 
-  useEffect(() => {
-      if (audioRef.current) audioRef.current.playbackRate = playbackSpeed;
-  }, [playbackSpeed]);
-
   const togglePlay = () => {
     if (readerState === ReaderState.PLAYING) {
-       // PAUSE
        if (isUsingSystemTTS) {
-           window.speechSynthesis.cancel(); // System TTS pause is flaky, cancel is safer for chunk-based logic
+           window.speechSynthesis.cancel();
        } else {
            if (audioRef.current) audioRef.current.pause();
        }
-       setIsPlayingRef(false);
+       isPlayingRef.current = false;
        setReaderState(ReaderState.PAUSED);
        saveProgressToCloud(); 
     } else {
-       // PLAY
-       setIsPlayingRef(true);
+       isPlayingRef.current = true;
        setReaderState(ReaderState.PLAYING);
        
        if (isUsingSystemTTS) {
@@ -390,37 +530,42 @@ export default function App() {
     }
   };
 
-  // ... (Audio Engine helpers handleChunkComplete, nextChunk remain mostly same, but need to check isUsingSystemTTS)
-  // Actually nextChunk uses isPlayingRef.current which we manage.
-  
-  const handleChunkComplete = useCallback(() => {
-     setChunks(prev => {
-        const nextIndex = currentChunkIndex + 1;
-        if (nextIndex < prev.length) {
-           setCurrentChunkIndex(nextIndex);
-        } else {
-           setReaderState(ReaderState.IDLE);
-           setIsPlayingRef(false);
-           saveProgressToCloud(); 
-        }
-        return prev;
-     });
-  }, [currentChunkIndex]); 
+  // --- EVENT HANDLERS ---
 
-  const nextChunk = () => {
-    setCurrentChunkIndex(prev => {
-        const next = prev + 1;
-        if (next >= chunks.length) {
-            setReaderState(ReaderState.IDLE);
-            setIsPlayingRef(false);
-            saveProgressToCloud();
-            return prev;
-        }
-        updateProgress(next);
-        return next;
-    });
+  const handleLogin = (user: UserProfile) => {
+    performLogin(user, false);
   };
 
+  const handleAddUser = (name: string) => {
+    const newUser: UserProfile = {
+      id: Date.now().toString(),
+      name,
+      avatarColor: 'bg-indigo-500',
+      playbackSpeed: 1.0, 
+      selectedVoice: 'Kore',
+      isDarkMode: true
+    };
+    setUsers([...users, newUser]);
+    saveUser(newUser);
+  };
+
+  const connectGoogle = () => {
+     handleGoogleLogin();
+  };
+
+  const handleInstallClick = () => {
+    if (installPrompt) {
+      installPrompt.prompt();
+      installPrompt.userChoice.then((choiceResult: any) => {
+        setInstallPrompt(null);
+      });
+    }
+  };
+
+  const handleUrlInputSubmit = async () => {
+    await importContentFromUrl(urlInput);
+    setUrlInput('');
+  };
 
   // --- RENDER ---
 
@@ -437,8 +582,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen transition-colors duration-300 pb-20 font-sans">
-      
-      {/* Header */}
       <header className="border-b border-gray-200 dark:border-white/10 bg-surface-light/80 dark:bg-surface-dark/80 backdrop-blur-md sticky top-0 z-50 transition-colors duration-300">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -502,10 +645,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-3xl mx-auto px-6 py-10 space-y-10 relative">
-        
-        {/* Library Modal */}
         {showLibrary && (
             <div className="absolute inset-0 z-40 bg-background-light dark:bg-background-dark/95 backdrop-blur-xl p-6 rounded-xl border border-gray-200 dark:border-white/10 shadow-2xl animate-fade-in min-h-[500px]">
                 <div className="flex justify-between items-center mb-6">
@@ -553,7 +693,6 @@ export default function App() {
                         </div>
                      ))}
                      
-                     {/* Upload File Button */}
                      <label className={`flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-white/5 cursor-pointer transition-colors ${isProcessingFile ? 'opacity-50 pointer-events-none' : ''}`}>
                         {isProcessingFile ? (
                           <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin mb-2"></div>
@@ -566,7 +705,6 @@ export default function App() {
                         <input type="file" className="hidden" accept=".txt,.pdf" onChange={handleFileUpload} disabled={isProcessingFile} />
                      </label>
 
-                     {/* Import URL Button */}
                      <button 
                        onClick={() => setShowUrlInput(true)}
                        className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-white/5 cursor-pointer transition-colors"
@@ -582,7 +720,6 @@ export default function App() {
             </div>
         )}
 
-        {/* Chapter Selection Modal */}
         {showChapters && (
             <div className="absolute top-20 right-6 z-30 w-64 bg-surface-light dark:bg-surface-dark rounded-xl shadow-2xl border border-gray-200 dark:border-white/10 overflow-hidden animate-fade-in">
                 <div className="p-3 bg-gray-50 dark:bg-white/5 border-b border-gray-200 dark:border-white/10 flex justify-between items-center">
@@ -626,10 +763,7 @@ export default function App() {
               )}
            </div>
         ) : (
-          /* Reader View */
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            
-            {/* Visualizer */}
             <div className="relative">
               <Visualizer isPlaying={readerState === ReaderState.PLAYING} isDarkMode={isDarkMode} />
               {isApiLoading && (
@@ -640,7 +774,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Controls */}
             <Controls 
               isPlaying={readerState === ReaderState.PLAYING}
               onPlayPause={togglePlay}
@@ -658,7 +791,6 @@ export default function App() {
               skipBackward={() => setCurrentChunkIndex(prev => Math.max(prev - 1, 0))}
             />
 
-            {/* Error */}
             {error && (
               <div className="flex items-center gap-2 p-4 rounded-lg bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-500/50 text-red-700 dark:text-red-200 text-sm">
                 <AlertCircle size={16} />
@@ -666,7 +798,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Pagination Controls & Header */}
             <div className="flex items-center justify-between bg-surface-light dark:bg-surface-dark p-3 rounded-t-xl border-x border-t border-gray-200 dark:border-white/10">
                <div className="flex items-center gap-2">
                    <button 
@@ -688,7 +819,6 @@ export default function App() {
                </div>
             </div>
 
-            {/* Book Page View */}
             <div className="min-h-[500px] bg-surface-light dark:bg-surface-dark/50 rounded-b-xl p-8 border border-gray-200 dark:border-white/5 shadow-inner transition-colors">
                 {pages.length > 0 && pages[currentPageIndex] ? (
                     <div className="leading-relaxed text-lg text-gray-800 dark:text-gray-200 font-serif space-y-2 text-justify">
@@ -702,7 +832,6 @@ export default function App() {
                                     key={chunk.id}
                                     onClick={() => {
                                         if (isError) {
-                                            // Manual retry
                                             setChunks(prev => prev.map(c => c.id === chunk.id ? { ...c, status: 'pending' } : c));
                                             return;
                                         }
@@ -712,7 +841,7 @@ export default function App() {
                                             } else {
                                                 if (audioRef.current) audioRef.current.pause();
                                             }
-                                            setIsPlayingRef(false);
+                                            setIsPlayingRef.current = false;
                                             setReaderState(ReaderState.IDLE);
                                             setCurrentChunkIndex(globalIndex);
                                         }
