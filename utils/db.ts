@@ -56,6 +56,11 @@ export const getBooksForUser = async (userId: string): Promise<Book[]> => {
     const request = index.getAll(userId);
 
     request.onsuccess = () => {
+        // Guard against null result
+        if (!request.result) {
+            resolve([]);
+            return;
+        }
         // Strip the userId field before returning to match Book type
         const books = request.result.map(b => {
             const { userId: _, ...book } = b;
