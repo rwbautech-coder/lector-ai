@@ -48,7 +48,8 @@ export const generateSpeechKokoro = async (text: string, voiceName: string): Pro
   console.log(`[KokoroService] Generating audio for: "${text.substring(0, 20)}..." with voice ${voiceId}`);
 
   // Generate returns an object containing audio data
-  const audio = await instance.generate(text, { voice: voiceId });
+  // Casting voiceId to any to bypass strict typing of Voice enum in kokoro-js
+  const audio = await instance.generate(text, { voice: voiceId as any });
   
   // audio.save() is for Node.js. For browser, we likely get an audio buffer or raw data.
   // Inspection of kokoro-js (based on transformers.js) suggests it might return an AudioBuffer-like object 

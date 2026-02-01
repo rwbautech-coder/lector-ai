@@ -14,6 +14,10 @@ export default defineConfig(({ mode }) => {
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+        workbox: {
+          maximumFileSizeToCacheInBytes: 30000000, // 30 MB to cache WASM files
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}']
+        },
         manifest: {
           name: 'Lector AI',
           short_name: 'LectorAI',
