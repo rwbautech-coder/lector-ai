@@ -57,24 +57,39 @@ export default function App() {
   // --- HELPER FOR LOGIN ---
   // Defined before usage in useEffect
   const performLogin = async (user: UserProfile, isAuto: boolean = false) => {
-    // Try to load user profile from DB, or use the passed one (predefined user)
-    let loadedUser = await getUser(user.id);
-    if (!loadedUser) {
-        // If not in DB, save the initial user (e.g., from PREDEFINED_USERS) to DB
-        loadedUser = { ...user };
-        await saveUser(loadedUser);
+    try {
+      // Try to load user profile from DB, or use the passed one (predefined user)
+      let loadedUser = await getUser(user.id);
+      if (!loadedUser) {
+          // If not in DB, save the initial user (e.g., from PREDEFINED_USERS) to DB
+          loadedUser = { ...user };
+          await saveUser(loadedUser);
+      }
+      
+      // Set current user and his settings
+      setCurrentUser(loadedUser);
+      setPlaybackSpeed(loadedUser.playbackSpeed ?? 1.3); // Fallback if undefined
+      setSelectedVoice(loadedUser.selectedVoice || 'Kore');
+      setIsDarkMode(loadedUser.isDarkMode ?? true);
+
+    } catch (dbError) {
+      console.error("Database error during login (likely iOS private mode or quota issue):", dbError);
+      // Fallback: Login with the provided user object in memory only
+      setCurrentUser(user);
+      setPlaybackSpeed(user.playbackSpeed ?? 1.3);
+      setSelectedVoice(user.selectedVoice || 'Kore');
+      setIsDarkMode(user.isDarkMode ?? true);
     }
-    
-    // Set current user and his settings
-    setCurrentUser(loadedUser);
-    setPlaybackSpeed(loadedUser.playbackSpeed);
-    setSelectedVoice(loadedUser.selectedVoice);
-    setIsDarkMode(loadedUser.isDarkMode);
 
     localStorage.setItem('lector_last_user_id', user.id); // Save for next time auto-login
     
-    const books = await getBooksForUser(user.id);
-    setMyBooks(books);
+    try {
+      const books = await getBooksForUser(user.id);
+      setMyBooks(books);
+    } catch (e) {
+      console.error("Failed to load books:", e);
+      setMyBooks([]);
+    }
     
     // Only show library if we are NOT about to auto-import a book
     if (!isAuto && !pendingAutoReadUrl) {

@@ -7,12 +7,22 @@ declare global {
   }
 }
 
-const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file email profile';
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
 
 let tokenClient: any;
 let gapiInited = false;
 let gisInited = false;
+
+export const getUserInfo = async (accessToken: string) => {
+  const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+  if (!response.ok) throw new Error('Failed to fetch user info');
+  return response.json();
+};
 
 // 1. Initialize GAPI (for making requests)
 export const initGapiClient = (apiKey: string): Promise<void> => {

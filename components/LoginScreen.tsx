@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { UserProfile, PREDEFINED_USERS, AppSettings } from '../types';
-import { User, Plus, Settings, Check } from 'lucide-react';
+import { User, Plus, Settings, Check, LogIn } from 'lucide-react';
 import { saveSettings, getSettings } from '../utils/db';
+import { initGapiClient, initGisClient, getUserInfo } from '../services/googleDriveService';
 
 interface LoginScreenProps {
   onLogin: (user: UserProfile) => void;
@@ -15,9 +16,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, availableUser
   const [newUserName, setNewUserName] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [config, setConfig] = useState<AppSettings>({ googleClientId: '', googleApiKey: '' });
+  const [isGoogleReady, setIsGoogleReady] = useState(false);
 
   useEffect(() => {
-    getSettings().then(setConfig);
+    getSettings().then((c) => {
+      setConfig(c);
+      if (c.googleClientId && c.googleApiKey) {
+        initGapiClient(c.googleApiKey).then(() => {
+          initGisClient(c.googleClientId!, () => {}); // Pre-init logic mainly
+          setIsGoogleReady(true);
+        });
+      }
+    });
   }, []);
 
   const handleAdd = () => {
@@ -28,10 +38,70 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, availableUser
     }
   };
 
+  const handleGoogleSignIn = () => {
+    if (!config.googleClientId) return;
+
+    // Re-init mainly to attach callback for this specific action if needed, 
+    // but here we use a temporary client or existing structure.
+    // For simplicity, we assume initGisClient sets up a global tokenClient.
+    // However, initGisClient in our service takes a callback. Let's create a specialized one here or modify service.
+    // Actually, initGisClient overwrites the global callback. So we call it again with OUR callback.
+    
+    initGisClient(config.googleClientId, async (tokenResponse) => {
+      if (tokenResponse && tokenResponse.access_token) {
+        try {
+          const userInfo = await getUserInfo(tokenResponse.access_token);
+          // userInfo has { name, email, picture, ... }
+          
+          // Check if user exists by email (if we stored email) or name
+          // Since our UserProfile didn't have email enforced, we'll check by name/id collision or create new
+          // Best logic: Search availableUsers for matching name or create new
+          
+          const existingUser = availableUsers.find(u => u.name === userInfo.name || (u.email === userInfo.email && userInfo.email));
+          
+          if (existingUser) {
+            onLogin(existingUser);
+          } else {
+            // Create new user profile from Google
+            const newUser: UserProfile = {
+              id: 'google_' + userInfo.sub, // Unique Google ID
+              name: userInfo.name,
+              avatarColor: 'bg-blue-600', // Default or could use picture
+              email: userInfo.email,
+              playbackSpeed: 1.3,
+              selectedVoice: 'Kore',
+              isDarkMode: true
+            };
+            // Use onAddUser logic but passing full object would be better. 
+            // Since onAddUser only takes name, we might need to bypass it or invoke onLogin directly 
+            // after ensuring App.tsx saves it.
+            // But App.tsx's performLogin saves the user if not exists! So we can just call onLogin(newUser).
+            onLogin(newUser);
+          }
+        } catch (err) {
+          console.error("Google Sign-In failed", err);
+        }
+      }
+    });
+    
+    // Trigger the popup
+    // We need to access the handleGoogleLogin-like trigger but with the callback we just set.
+    // In our service, handleGoogleLogin() calls tokenClient.requestAccessToken().
+    // We can import handleGoogleLogin and call it.
+    const { handleGoogleLogin } = require('../services/googleDriveService');
+    handleGoogleLogin();
+  };
+
   const saveConfig = () => {
     saveSettings(config).then(() => {
       onUpdateSettings(config);
       setShowSettings(false);
+      // Try to init google if keys provided
+      if (config.googleClientId && config.googleApiKey) {
+          initGapiClient(config.googleApiKey).then(() => {
+              setIsGoogleReady(true);
+          });
+      }
     });
   };
 
@@ -43,8 +113,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, availableUser
              <Settings /> Configuration
            </h2>
            <p className="text-sm text-gray-500 mb-4">
-             To enable Google Drive Sync, you must provide your own keys from Google Cloud Console.
-             Ensure the keys have permissions for Google Drive API.
+             To enable Google Sign-In and Drive Sync, provide your keys from Google Cloud Console.
            </p>
            
            <div className="space-y-4">
@@ -86,7 +155,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, availableUser
       
       <button 
         onClick={() => setShowSettings(true)}
-        className="absolute top-6 right-6 p-2 text-gray-400 hover:text-primary transition-colors"
+        className="absolute top-6 right-6 p-2 text-gray-400 hover:text-primary transition-colors z-20"
       >
         <Settings size={24} />
       </button>
@@ -96,12 +165,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, availableUser
         <p className="text-gray-500 dark:text-gray-400">Select your profile to load your library</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-8 max-w-4xl mx-auto">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-8 max-w-4xl mx-auto mb-10">
         {availableUsers.map((user) => (
           <div key={user.id} className="group flex flex-col items-center gap-3 animate-fade-in-up">
             <button 
               onClick={() => onLogin(user)}
-              className={`w-24 h-24 rounded-full ${user.avatarColor} flex items-center justify-center shadow-lg transform transition-all duration-300 group-hover:scale-110 group-hover:ring-4 ring-primary/30`}
+              className={`w-24 h-24 rounded-full ${user.avatarColor} flex items-center justify-center shadow-lg transform transition-all duration-300 group-hover:scale-110 group-hover:ring-4 ring-primary/30 cursor-pointer`}
             >
               <span className="text-3xl font-bold text-white uppercase">{user.name[0]}</span>
             </button>
@@ -129,7 +198,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, availableUser
             ) : (
               <button 
                 onClick={() => setIsAdding(true)}
-                className="w-24 h-24 rounded-full bg-gray-200 dark:bg-white/5 border-2 border-dashed border-gray-400 dark:border-gray-600 flex items-center justify-center hover:bg-gray-300 dark:hover:bg-white/10 transition-colors"
+                className="w-24 h-24 rounded-full bg-gray-200 dark:bg-white/5 border-2 border-dashed border-gray-400 dark:border-gray-600 flex items-center justify-center hover:bg-gray-300 dark:hover:bg-white/10 transition-colors cursor-pointer"
               >
                 <Plus size={32} className="text-gray-500 dark:text-gray-400" />
               </button>
@@ -137,6 +206,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, availableUser
             <span className="text-lg font-medium text-gray-500 dark:text-gray-400">Add Profile</span>
         </div>
       </div>
+
+      {/* Google Sign In Button */}
+      {isGoogleReady && (
+        <div className="animate-fade-in-up delay-200">
+           <button 
+             onClick={handleGoogleSignIn}
+             className="flex items-center gap-3 px-6 py-3 bg-white dark:bg-white/10 text-gray-700 dark:text-white rounded-full shadow-md hover:shadow-lg transition-all border border-gray-200 dark:border-transparent"
+           >
+             <LogIn size={20} />
+             <span className="font-medium">Sign in with Google</span>
+           </button>
+        </div>
+      )}
     </div>
   );
 };
