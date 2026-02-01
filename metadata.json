@@ -1,0 +1,5 @@
+{
+  "name": "LectorAI - Professional TTS",
+  "description": "An advanced text-to-speech reader using Gemini 2.5 to provide professional, human-like narration for uploaded documents with adjustable speed control.",
+  "requestFramePermissions": []
+}

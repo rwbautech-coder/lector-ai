@@ -1,0 +1,71 @@
+export interface TextChunk {
+  id: number;
+  text: string;
+  status: 'pending' | 'generating' | 'ready' | 'playing' | 'completed';
+  audioUrl?: string; // Blob URL for HTMLAudioElement
+}
+
+export interface Page {
+  id: number;
+  chunks: TextChunk[]; // Contains references or copies of chunks belonging to this page
+  startChunkIndex: number; // Index in the global chunks array
+  endChunkIndex: number;
+  contentDisplay: string; // Full text of the page for display
+}
+
+export interface Chapter {
+  title: string;
+  pageIndex: number;
+  chunkIndex: number;
+}
+
+export enum ReaderState {
+  IDLE = 'IDLE',
+  PROCESSING = 'PROCESSING',
+  PLAYING = 'PLAYING',
+  PAUSED = 'PAUSED',
+}
+
+export interface VoiceConfig {
+  name: string;
+  id: string;
+}
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  avatarColor: string;
+  email?: string; // Connected Google Email
+  googleToken?: string; // Access Token
+}
+
+export interface Book {
+  id: string; // usually filename + timestamp
+  title: string;
+  content: string;
+  lastRead: number; // timestamp
+  currentChunkIndex: number;
+  totalChunks: number;
+  lastModified: number; // For sync resolution
+}
+
+export interface AppSettings {
+  googleClientId?: string;
+  googleApiKey?: string;
+}
+
+// Available voices in Gemini 2.5
+export const AVAILABLE_VOICES: VoiceConfig[] = [
+  { name: 'Kore (Female - Balanced)', id: 'Kore' },
+  { name: 'Puck (Male - Balanced)', id: 'Puck' },
+  { name: 'Fenrir (Male - Deep)', id: 'Fenrir' },
+  { name: 'Charon (Male - Authoritative)', id: 'Charon' },
+  { name: 'Zephyr (Female - Soft)', id: 'Zephyr' },
+];
+
+export const PREDEFINED_USERS: UserProfile[] = [
+  { id: '1', name: 'Grzegorz', avatarColor: 'bg-blue-500' },
+  { id: '2', name: 'Magda', avatarColor: 'bg-pink-500' },
+  { id: '3', name: 'Natalia', avatarColor: 'bg-purple-500' },
+  { id: '4', name: 'Marcel', avatarColor: 'bg-green-500' },
+];
