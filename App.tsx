@@ -52,6 +52,7 @@ export default function App() {
   // --- REFS ---
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isPlayingRef = useRef<boolean>(false);
+  const nextChunkRef = useRef<() => void>(() => {});
   // System TTS Ref
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const [isUsingSystemTTS, setIsUsingSystemTTS] = useState<boolean>(false);
@@ -103,16 +104,25 @@ export default function App() {
 
   const initAudio = () => {
     if (!audioRef.current) {
+      console.log("[Audio] Initializing HTMLAudioElement...");
       audioRef.current = new Audio();
       audioRef.current.preservesPitch = true;
       audioRef.current.onended = () => {
-        if (isPlayingRef.current) nextChunk();
+        console.log("[Audio] Playback ended.");
+        if (isPlayingRef.current) {
+            nextChunkRef.current();
+        }
       };
-      audioRef.current.onerror = () => {
-        console.error("Audio playback error");
+      audioRef.current.onerror = (e) => {
+        console.error("[Audio] Error event fired:", audioRef.current?.error);
         setIsPlayingRef(false);
         setReaderState(ReaderState.IDLE);
       };
+      audioRef.current.onloadedmetadata = () => {
+        console.log(`[Audio] Metadata loaded. Duration: ${audioRef.current?.duration}s`);
+      };
+      audioRef.current.onplay = () => console.log("[Audio] Started playing.");
+      audioRef.current.onpause = () => console.log("[Audio] Paused.");
     }
   };
 
@@ -335,17 +345,19 @@ export default function App() {
     
     // Detect Mobile Device
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    console.log(`[App] Device detection: ${isMobile ? 'Mobile' : 'Desktop'}`);
     
     // Start warming up models
     setTimeout(() => {
         if (isMobile) {
-             console.log("Mobile device detected. Skipping AI TTS init, forcing System TTS.");
+             console.log("[App] Skipping AI TTS warmup on mobile, using System TTS.");
              setIsUsingSystemTTS(true);
         } else {
-            initKokoro().catch(e => console.error("Kokoro init deferred/failed", e));
-            initPiper().catch(e => console.error("Piper init deferred/failed", e));
+            console.log("[App] Warming up AI models...");
+            initKokoro().catch(e => console.warn("Kokoro warmup deferred:", e.message));
+            initPiper().catch(e => console.warn("Piper warmup deferred:", e.message));
         }
-    }, 1000);
+    }, 1500);
 
     // PWA Install Event Listener
 
@@ -435,7 +447,9 @@ export default function App() {
   const nextChunk = () => {
     setCurrentChunkIndex(prev => {
         const next = prev + 1;
+        console.log(`[Reader] Moving to next chunk: ${next} / ${chunks.length}`);
         if (next >= chunks.length) {
+            console.log("[Reader] Reached end of book.");
             setReaderState(ReaderState.IDLE);
             setIsPlayingRef(false);
             saveProgressToCloud();
@@ -446,7 +460,12 @@ export default function App() {
     });
   };
 
-  const bufferChunk = useCallback(async (index: number) => {
+  // Keep nextChunkRef updated to avoid stale closures in event listeners
+  useEffect(() => {
+    nextChunkRef.current = nextChunk;
+  }, [nextChunk]);
+
+  const triggerSync = async (userId: string) => {
     if (index >= chunks.length || index < 0) return;
     
     if (isUsingSystemTTS) {
@@ -482,13 +501,14 @@ export default function App() {
         }
 
         const audioUrl = URL.createObjectURL(wavBlob);
+        console.log(`[Reader] Chunk ${index} ready. Audio URL created.`);
 
         setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'ready', audioUrl } : c));
-    } catch (err) {
+    } catch (err: any) {
         console.error(`Error buffering chunk ${index}`, err);
-        console.warn("Kokoro failed, switching to System TTS fallback.");
+        setError(`TTS Error: ${err.message || 'Unknown error'}. Switching to system fallback.`);
         setIsUsingSystemTTS(true);
-        setError(null); 
+        // Mark as ready so the reader can at least use system TTS for it
         setChunks(prev => prev.map((c, i) => i >= index ? { ...c, status: 'ready' } : c));
     } finally {
         if (index === currentChunkIndex) setIsApiLoading(false);
@@ -526,6 +546,9 @@ export default function App() {
 
     // --- SYSTEM TTS PLAYBACK ---
     if (isUsingSystemTTS || !chunk.audioUrl) {
+        if (!isUsingSystemTTS && !chunk.audioUrl) {
+            console.warn(`[Audio] Chunk ${currentChunkIndex} has no audioUrl, falling back to System TTS.`);
+        }
         window.speechSynthesis.cancel();
 
         const utterance = new SpeechSynthesisUtterance(chunk.text);
@@ -579,6 +602,7 @@ export default function App() {
     const audio = audioRef.current!;
 
     if (audio.src !== chunk.audioUrl) {
+        console.log(`[Audio] Setting new src for chunk ${currentChunkIndex}`);
         audio.src = chunk.audioUrl;
         audio.load();
     }
@@ -587,30 +611,58 @@ export default function App() {
     
     try {
         console.log(`[Audio] Attempting to play chunk ${currentChunkIndex}:`, chunk.audioUrl);
-        await audio.play();
+        
+        // Use a small delay to ensure the browser has processed the new src
+        await new Promise(resolve => setTimeout(resolve, 50));
+
+        const playPromise = audio.play();
+        
+        // Add a safety timeout for play() to prevent hanging UI
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Audio play timeout")), 8000)
+        );
+
+        await Promise.race([playPromise, timeoutPromise]);
+        
+        console.log(`[Audio] Playback started for chunk ${currentChunkIndex}`);
         setReaderState(ReaderState.PLAYING);
         setIsPlayingRef(true);
         setChunks(prev => prev.map((c, i) => i === currentChunkIndex ? { ...c, status: 'playing' } : c));
-    } catch (e) {
-        console.warn("Auto-play blocked or audio failed", e);
-        console.warn("Audio file playback failed, switching to System TTS.");
+    } catch (e: any) {
+        console.warn("[Audio] Playback failed or blocked:", e);
+        console.warn("[Audio] Switching to System TTS fallback for this chunk.");
+        
+        // Fallback to System TTS for this chunk if audio fails
         setIsUsingSystemTTS(true);
-        // Avoid infinite loop if switch happens inside play call; check isUsingSystemTTS again in recursive call
-        // But since we just set state, we can't retry immediately in same closure.
-        // Let user or next effect trigger it. Or better: manually trigger system speech here.
-        // For simplicity, let's just let the state update handle the next attempt (or user click).
-        // Actually, let's try to recover instantly.
-        window.speechSynthesis.speak(new SpeechSynthesisUtterance(chunk.text)); // Quick fallback
+        
+        // Try to trigger system TTS immediately
+        const fallbackUtterance = new SpeechSynthesisUtterance(chunk.text);
+        fallbackUtterance.rate = playbackSpeed;
+        fallbackUtterance.onend = () => {
+            if (isPlayingRef.current) nextChunkRef.current();
+        };
+        window.speechSynthesis.speak(fallbackUtterance);
     }
-  }, [chunks, currentChunkIndex, playbackSpeed, bufferChunk, isUsingSystemTTS]);
+  }, [chunks, currentChunkIndex, playbackSpeed, isUsingSystemTTS]);
 
   useEffect(() => {
-    if (isPlayingRef.current && chunks[currentChunkIndex]?.status === 'ready') {
+    if (readerState === ReaderState.PLAYING && chunks[currentChunkIndex]?.status === 'ready') {
        playCurrentChunk();
     }
-  }, [chunks, currentChunkIndex, isPlayingRef.current, playCurrentChunk]);
+  }, [chunks, currentChunkIndex, readerState, playCurrentChunk]);
 
   const togglePlay = () => {
+    initAudio();
+    
+    // Prime the audio element to allow async play() calls later (needed for Safari/iOS)
+    if (audioRef.current && readerState !== ReaderState.PLAYING) {
+        audioRef.current.play().then(() => {
+            audioRef.current?.pause();
+        }).catch(() => {
+            // This might fail if src is not set, which is fine
+        });
+    }
+
     if (readerState === ReaderState.PLAYING) {
        if (isUsingSystemTTS) {
            window.speechSynthesis.cancel();
