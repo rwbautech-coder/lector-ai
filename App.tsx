@@ -238,27 +238,40 @@ export default function App() {
 
   }, [currentChunkIndex, chunks, selectedVoice]);
   
-  // ... (inside bufferChunk function)
-        (async () => {
-            try {
-                if (index === currentChunkIndex) setIsApiLoading(true);
+  const bufferChunk = useCallback(async (index: number) => {
+    if (index >= chunks.length || index < 0) return;
+    
+    const chunkToCheck = chunks[index];
+    if (!chunkToCheck) return;
 
-                const base64Pcm = await generateSpeechFromText(chunk.text, selectedVoice);
-                const pcmData = base64ToPcm(base64Pcm);
-                const wavBlob = createWavBlob(pcmData);
-                const audioUrl = URL.createObjectURL(wavBlob);
+    if (chunkToCheck.status === 'ready' || chunkToCheck.status === 'generating' || chunkToCheck.status === 'playing' || chunkToCheck.audioUrl || chunkToCheck.status === 'error') {
+        return;
+    }
 
-                setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'ready', audioUrl } : c));
-            } catch (err) {
-                console.error(`Error buffering chunk ${index}`, err);
-                // Set to 'error' so we don't loop infinitely
-                setError(index === currentChunkIndex ? "Failed to generate audio. Check API Key or quota." : null);
-                setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'error' } : c));
-            } finally {
-                if (index === currentChunkIndex) setIsApiLoading(false);
-            }
-        })();
-  // ...
+    setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'generating' } : c));
+    
+    try {
+        if (index === currentChunkIndex) setIsApiLoading(true);
+
+        const base64Pcm = await generateSpeechFromText(chunkToCheck.text, selectedVoice);
+        const pcmData = base64ToPcm(base64Pcm);
+        const wavBlob = createWavBlob(pcmData);
+        const audioUrl = URL.createObjectURL(wavBlob);
+
+        setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'ready', audioUrl } : c));
+    } catch (err) {
+        console.error(`Error buffering chunk ${index}`, err);
+        if (index === currentChunkIndex) {
+             setError("Failed to generate audio.");
+        }
+        setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'error' } : c));
+    } finally {
+        if (index === currentChunkIndex) setIsApiLoading(false);
+    }
+
+  }, [chunks, selectedVoice, currentChunkIndex]);
+
+  // --- USER LOGIC ---
 
   const handleLogin = (user: UserProfile) => {
     performLogin(user, false);
@@ -563,42 +576,6 @@ export default function App() {
         return next;
     });
   };
-
-  const bufferChunk = useCallback(async (index: number) => {
-    if (index >= chunks.length || index < 0) return;
-    
-    setChunks(currentChunks => {
-        const chunk = currentChunks[index];
-        if (chunk.status === 'ready' || chunk.status === 'generating' || chunk.status === 'playing' || chunk.audioUrl) {
-            return currentChunks;
-        }
-
-        const newChunks = [...currentChunks];
-        newChunks[index] = { ...chunk, status: 'generating' };
-        
-        (async () => {
-            try {
-                if (index === currentChunkIndex) setIsApiLoading(true);
-
-                const base64Pcm = await generateSpeechFromText(chunk.text, selectedVoice);
-                const pcmData = base64ToPcm(base64Pcm);
-                const wavBlob = createWavBlob(pcmData);
-                const audioUrl = URL.createObjectURL(wavBlob);
-
-                setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'ready', audioUrl } : c));
-            } catch (err) {
-                console.error(`Error buffering chunk ${index}`, err);
-                setError(index === currentChunkIndex ? "Failed to generate audio." : null);
-                setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'error' } : c));
-            } finally {
-                if (index === currentChunkIndex) setIsApiLoading(false);
-            }
-        })();
-
-        return newChunks;
-    });
-
-  }, [chunks, selectedVoice, currentChunkIndex]);
 
   const playCurrentChunk = useCallback(async () => {
     const chunk = chunks[currentChunkIndex];
