@@ -19,7 +19,7 @@ export const initKokoro = async (): Promise<KokoroTTS> => {
   console.log("[KokoroService] Initializing model...");
   
   modelLoading = KokoroTTS.from_pretrained(MODEL_ID, {
-    dtype: "q8",      // Quantized for browser performance (smaller download)
+    dtype: "q4",      // 4-bit quantization (~40MB) to save memory on mobile
     device: "wasm",   // WebAssembly (safest for broad compatibility)
   }).then(instance => {
     tts = instance;
