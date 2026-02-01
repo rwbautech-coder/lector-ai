@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => {
       assetsDir: 'assets',
       sourcemap: true, // Enable sourcemaps for better debugging
       minify: false,   // Disable minification to see real variable names
-      target: 'es2020', // Balanced target: supports BigInt but safer than esnext for iOS
+      target: 'es2017', // Safer target for older iOS
     },
     define: {
       // This exposes process.env.API_KEY to the client-side code

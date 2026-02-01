@@ -1,15 +1,11 @@
-import * as piper from '@diffusionstudio/piper-wasm';
+import { createWavBlob } from "../utils/audioUtils";
+import { getTypeToSpeech, PiperVoice } from '@diffusionstudio/piper-wasm';
 
 const VOICES = {
   pl: {
     id: 'pl_PL-gosia-medium',
-    base: 'https://huggingface.co/rhasspy/piper-voices/resolve/main/pl/pl_PL/gosia/medium/pl_PL-gosia-medium'
-  },
-  en: {
-    id: 'en_US-lessac-medium',
-    base: 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium'
-  }
-};
+    name: 'Gosia',
+
 
 let tts: any = null;
 let currentLanguage: 'pl' | 'en' | null = null;
