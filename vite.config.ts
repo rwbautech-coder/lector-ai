@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
       react(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg', 'piper.wasm'],
         workbox: {
           maximumFileSizeToCacheInBytes: 30000000, // 30 MB to cache WASM files
           globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm}']
@@ -39,10 +39,6 @@ export default defineConfig(({ mode }) => {
         }
       })
     ],
-    // Force Vite to pre-bundle piper-wasm to fix Rollup resolution
-    optimizeDeps: {
-      include: ['@diffusionstudio/piper-wasm'],
-    },
     base: './', // Crucial for GitHub Pages to work in a subdirectory
     build: {
       outDir: 'dist',
@@ -50,11 +46,6 @@ export default defineConfig(({ mode }) => {
       sourcemap: true, // Enable sourcemaps for better debugging
       minify: false,   // Disable minification to see real variable names
       target: 'es2020', // Balanced target: supports BigInt but safer than esnext for iOS
-      rollupOptions: {
-        plugins: [
-          nodeResolve(), // Add node-resolve plugin
-        ],
-      },
     },
     define: {
       // This exposes process.env.API_KEY to the client-side code

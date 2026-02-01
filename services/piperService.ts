@@ -18,9 +18,10 @@ export const initPiper = async () => {
   if (tts) return tts;
   
   console.log("[PiperService] Initializing WASM...");
+  
   try {
-      // Initialize the engine
       tts = await piper.getTypeToSpeech({
+          wasmPath: '/piper.wasm', // Explicitly provide path to WASM
           logger: (msg: any) => console.log(`[PiperWASM]`, msg)
       });
   } catch (e) {
