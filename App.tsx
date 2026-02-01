@@ -516,9 +516,25 @@ export default function App() {
         utterance.rate = playbackSpeed;
         
         const voices = window.speechSynthesis.getVoices();
+        // Debug available voices
+        console.log("Available System Voices:", voices.map(v => `${v.name} (${v.lang})`));
+
         const lang = detectLanguage(chunk.text);
-        const voice = voices.find(v => v.lang.startsWith(lang === 'pl' ? 'pl' : 'en'));
-        if (voice) utterance.voice = voice;
+        const prefix = lang === 'pl' ? 'pl' : 'en';
+        
+        // Prefer High Quality voices
+        let voice = voices.find(v => v.lang.startsWith(prefix) && (v.name.includes("Google") || v.name.includes("Siri") || v.name.includes("Premium") || v.name.includes("Enhanced") || v.name.includes("Natural")));
+        
+        if (!voice) {
+             voice = voices.find(v => v.lang.startsWith(prefix));
+        }
+        
+        if (voice) {
+            console.log(`Selected System Voice: ${voice.name}`);
+            utterance.voice = voice;
+        } else {
+            console.warn(`No voice found for language: ${prefix}`);
+        }
 
         utterance.onend = () => {
             if (isPlayingRef.current) {
