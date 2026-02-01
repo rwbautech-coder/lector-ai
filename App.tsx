@@ -329,16 +329,23 @@ export default function App() {
   // --- INITIALIZATION EFFECTS ---
 
   useEffect(() => {
+    // Initial theme setting now comes from user profile after login
     getSettings().then(setConfig);
     
-    setTimeout(() => {
-        initKokoro().catch(err => console.error("Failed to warm up Kokoro:", err));
-    }, 1000);
+    // Detect Mobile Device
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    if (isMobile) {
+        console.log("Mobile device detected. Switching to System TTS for stability.");
+        setIsUsingSystemTTS(true);
+    } else {
+        // Start warming up the AI Model (Kokoro) only on Desktop
+        setTimeout(() => {
+            initKokoro().catch(err => console.error("Failed to warm up Kokoro:", err));
+        }, 1000);
+    }
 
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      setInstallPrompt(e);
-    });
+    // PWA Install Event Listener
 
     const loadAllUsers = async () => {
         const initialUsers: UserProfile[] = [];
