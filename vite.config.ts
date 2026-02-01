@@ -42,7 +42,8 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       assetsDir: 'assets',
-      sourcemap: false,
+      sourcemap: true, // Enable sourcemaps for better debugging
+      minify: false,   // Disable minification to see real variable names
       target: 'es2020' // Balanced target: supports BigInt but safer than esnext for iOS
     },
     define: {
