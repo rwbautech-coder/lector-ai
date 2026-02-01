@@ -444,21 +444,27 @@ export default function App() {
 
   // --- AUDIO LOGIC ---
 
-  const nextChunk = () => {
+  const nextChunk = useCallback(() => {
     setCurrentChunkIndex(prev => {
         const next = prev + 1;
-        console.log(`[Reader] Moving to next chunk: ${next} / ${chunks.length}`);
+        console.log(`[Reader] Advancing to chunk: ${next} / ${chunks.length}`);
         if (next >= chunks.length) {
-            console.log("[Reader] Reached end of book.");
+            console.log("[Reader] Reached end of content.");
             setReaderState(ReaderState.IDLE);
             setIsPlayingRef(false);
             saveProgressToCloud();
             return prev;
         }
-        updateProgress(next);
         return next;
     });
-  };
+  }, [chunks.length]);
+
+  // Handle progress updates in a separate effect to avoid nested state updates
+  useEffect(() => {
+    if (currentUser && currentBook && currentChunkIndex !== currentBook.currentChunkIndex) {
+        updateProgress(currentChunkIndex);
+    }
+  }, [currentChunkIndex, currentUser, currentBook]);
 
   // Keep nextChunkRef updated to avoid stale closures in event listeners
   useEffect(() => {
@@ -549,42 +555,41 @@ export default function App() {
         if (!isUsingSystemTTS && !chunk.audioUrl) {
             console.warn(`[Audio] Chunk ${currentChunkIndex} has no audioUrl, falling back to System TTS.`);
         }
+        
         window.speechSynthesis.cancel();
+
+        // Small delay after cancel to ensure the browser is ready for new speech
+        await new Promise(resolve => setTimeout(resolve, 60));
 
         const utterance = new SpeechSynthesisUtterance(chunk.text);
         utterance.rate = playbackSpeed;
         
         const voices = window.speechSynthesis.getVoices();
-        // Debug available voices
-        console.log("Available System Voices:", voices.map(v => `${v.name} (${v.lang})`));
-
         const lang = detectLanguage(chunk.text);
         const prefix = lang === 'pl' ? 'pl' : 'en';
         
-        // Prefer High Quality voices
         let voice = voices.find(v => v.lang.startsWith(prefix) && (v.name.includes("Google") || v.name.includes("Siri") || v.name.includes("Premium") || v.name.includes("Enhanced") || v.name.includes("Natural")));
+        if (!voice) voice = voices.find(v => v.lang.startsWith(prefix));
         
-        if (!voice) {
-             voice = voices.find(v => v.lang.startsWith(prefix));
-        }
-        
-        if (voice) {
-            console.log(`Selected System Voice: ${voice.name}`);
-            utterance.voice = voice;
-        } else {
-            console.warn(`No voice found for language: ${prefix}`);
-        }
+        if (voice) utterance.voice = voice;
+
+        utterance.onstart = () => {
+            console.log(`[SystemTTS] Started chunk ${currentChunkIndex}`);
+            setChunks(prev => prev.map((c, i) => i === currentChunkIndex ? { ...c, status: 'playing' } : c));
+        };
 
         utterance.onend = () => {
+            console.log(`[SystemTTS] Finished chunk ${currentChunkIndex}`);
             if (isPlayingRef.current) {
-                nextChunk();
+                // Use setTimeout to avoid potential stack overflow or race conditions
+                setTimeout(() => nextChunkRef.current(), 10);
             }
         };
+
         utterance.onerror = (e) => {
-            console.error("System TTS Error:", e);
-            if (e.error !== 'interrupted') {
-                 setIsPlayingRef(false);
-                 setReaderState(ReaderState.IDLE);
+            console.error("[SystemTTS] Error:", e);
+            if (e.error !== 'interrupted' && isPlayingRef.current) {
+                 setTimeout(() => nextChunkRef.current(), 100);
             }
         };
 
@@ -593,7 +598,6 @@ export default function App() {
         
         setReaderState(ReaderState.PLAYING);
         setIsPlayingRef(true);
-        setChunks(prev => prev.map((c, i) => i === currentChunkIndex ? { ...c, status: 'playing' } : c));
         return;
     }
 
@@ -646,10 +650,14 @@ export default function App() {
   }, [chunks, currentChunkIndex, playbackSpeed, isUsingSystemTTS]);
 
   useEffect(() => {
-    if (readerState === ReaderState.PLAYING && chunks[currentChunkIndex]?.status === 'ready') {
+    const chunk = chunks[currentChunkIndex];
+    // For system TTS, we can start even if status is pending, because it doesn't need to generate a blob first
+    const isReady = isUsingSystemTTS ? (chunk?.status === 'ready' || chunk?.status === 'pending') : (chunk?.status === 'ready');
+    
+    if (readerState === ReaderState.PLAYING && isReady) {
        playCurrentChunk();
     }
-  }, [chunks, currentChunkIndex, readerState, playCurrentChunk]);
+  }, [chunks, currentChunkIndex, readerState, playCurrentChunk, isUsingSystemTTS]);
 
   const togglePlay = () => {
     initAudio();
