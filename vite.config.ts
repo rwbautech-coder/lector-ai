@@ -38,6 +38,10 @@ export default defineConfig(({ mode }) => {
         }
       })
     ],
+    // Force Vite to pre-bundle piper-wasm to fix Rollup resolution
+    optimizeDeps: {
+      include: ['@diffusionstudio/piper-wasm'],
+    },
     base: './', // Crucial for GitHub Pages to work in a subdirectory
     build: {
       outDir: 'dist',
