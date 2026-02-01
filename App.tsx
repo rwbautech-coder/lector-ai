@@ -887,6 +887,8 @@ export default function App() {
               toggleTheme={() => setIsDarkMode(!isDarkMode)}
               skipForward={() => nextChunk()}
               skipBackward={() => setCurrentChunkIndex(prev => Math.max(prev - 1, 0))}
+              isUsingSystemTTS={isUsingSystemTTS}
+              onToggleSystemTTS={() => setIsUsingSystemTTS(!isUsingSystemTTS)}
             />
 
             {error && (
