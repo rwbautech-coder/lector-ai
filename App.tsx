@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Upload, FileText, AlertCircle, BookOpen, Clock, X, Cloud, LogOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, List, Download, Link as LinkIcon, Globe } from 'lucide-react';
 import { AVAILABLE_VOICES, TextChunk, ReaderState, UserProfile, PREDEFINED_USERS, Book, AppSettings, Page, Chapter } from './types';
-import { generateSpeechFromText } from './services/geminiService';
-import { base64ToPcm, createWavBlob, chunkText, organizePages } from './utils/audioUtils';
+import { generateSpeechKokoro, initKokoro } from './services/kokoroService';
+import { chunkText, organizePages } from './utils/audioUtils';
 import { extractTextFromPdf } from './utils/pdfUtils';
 import { Visualizer } from './components/Visualizer';
 import { Controls } from './components/Controls';
@@ -102,6 +102,9 @@ export default function App() {
   useEffect(() => {
     // Initial theme setting now comes from user profile after login
     getSettings().then(setConfig);
+    
+    // Start warming up the AI Model (Kokoro)
+    initKokoro().catch(err => console.error("Failed to warm up Kokoro:", err));
 
     // PWA Install Event Listener
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -253,9 +256,7 @@ export default function App() {
     try {
         if (index === currentChunkIndex) setIsApiLoading(true);
 
-        const base64Pcm = await generateSpeechFromText(chunkToCheck.text, selectedVoice);
-        const pcmData = base64ToPcm(base64Pcm);
-        const wavBlob = createWavBlob(pcmData);
+        const wavBlob = await generateSpeechKokoro(chunkToCheck.text, selectedVoice);
         const audioUrl = URL.createObjectURL(wavBlob);
 
         setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'ready', audioUrl } : c));

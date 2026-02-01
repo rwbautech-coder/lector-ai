@@ -58,10 +58,13 @@ export interface AppSettings {
   googleApiKey?: string;
 }
 
-// Available voices in Gemini 2.5
+// Available voices in Kokoro TTS (Local)
 export const AVAILABLE_VOICES: VoiceConfig[] = [
-  { name: 'Kore (Female - Balanced)', id: 'Kore' },
-  { name: 'Fenrir (Male - Deep)', id: 'Fenrir' },
+  { name: 'Heart (Female - US)', id: 'Kore' },        // Maps to af_heart
+  { name: 'Adam (Male - US)', id: 'Fenrir' },         // Maps to am_adam
+  { name: 'Bella (Female - US)', id: 'Zephyr' },      // Maps to af_bella
+  { name: 'Michael (Male - US)', id: 'Puck' },        // Maps to am_michael
+  { name: 'George (Male - UK)', id: 'Charon' },       // Maps to bm_george
 ];
 
 export const PREDEFINED_USERS: UserProfile[] = [
