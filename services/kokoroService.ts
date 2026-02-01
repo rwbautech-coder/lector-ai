@@ -1,4 +1,5 @@
 import { KokoroTTS } from "kokoro-js";
+import { createWavBlob } from "../utils/audioUtils";
 
 // Singleton instance
 let tts: KokoroTTS | null = null;
@@ -49,13 +50,14 @@ export const generateSpeechKokoro = async (text: string, voiceName: string): Pro
 
   // Generate returns an object containing audio data
   // Casting voiceId to any to bypass strict typing of Voice enum in kokoro-js
-  const audio = await instance.generate(text, { voice: voiceId as any });
+  const result = await instance.generate(text, { voice: voiceId as any });
   
-  // audio.save() is for Node.js. For browser, we likely get an audio buffer or raw data.
-  // Inspection of kokoro-js (based on transformers.js) suggests it might return an AudioBuffer-like object 
-  // or we need to extract the raw data.
-  // Assuming standard RawAudio output from generate(): { audio: Float32Array, sampling_rate: number }
+  if (!result || !result.audio) {
+      throw new Error("Kokoro generation failed: No audio data returned");
+  }
   
-  // Let's create a WAV blob from the raw data.
-  return audio.toBlob();
+  // Create WAV blob from Float32Array
+  // Sampling rate defaults to 24000 for Kokoro, but let's use the one from result if available
+  const sampleRate = result.sampling_rate || 24000;
+  return createWavBlob(result.audio, sampleRate);
 };
