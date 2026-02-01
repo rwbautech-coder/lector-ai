@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { UserProfile, PREDEFINED_USERS, AppSettings } from '../types';
 import { User, Plus, Settings, Check, LogIn } from 'lucide-react';
 import { saveSettings, getSettings } from '../utils/db';
-import { initGapiClient, initGisClient, getUserInfo } from '../services/googleDriveService';
+import { initGapiClient, initGisClient, getUserInfo, handleGoogleLogin } from '../services/googleDriveService';
 
 interface LoginScreenProps {
   onLogin: (user: UserProfile) => void;
@@ -87,8 +87,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, availableUser
     // Trigger the popup
     // We need to access the handleGoogleLogin-like trigger but with the callback we just set.
     // In our service, handleGoogleLogin() calls tokenClient.requestAccessToken().
-    // We can import handleGoogleLogin and call it.
-    const { handleGoogleLogin } = require('../services/googleDriveService');
     handleGoogleLogin();
   };
 

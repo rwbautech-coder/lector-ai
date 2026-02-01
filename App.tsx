@@ -104,8 +104,10 @@ export default function App() {
     // Initial theme setting now comes from user profile after login
     getSettings().then(setConfig);
     
-    // Start warming up the AI Model (Kokoro)
-    initKokoro().catch(err => console.error("Failed to warm up Kokoro:", err));
+    // Start warming up the AI Model (Kokoro) with a slight delay to not block UI thread on mobile
+    setTimeout(() => {
+        initKokoro().catch(err => console.error("Failed to warm up Kokoro:", err));
+    }, 1000);
 
     // PWA Install Event Listener
     window.addEventListener('beforeinstallprompt', (e) => {
