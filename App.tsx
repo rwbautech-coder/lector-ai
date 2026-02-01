@@ -124,16 +124,17 @@ export default function App() {
         }
         setUsers(initialUsers);
 
-        // Check for auto-login after loading all users
+        // Auto-login removed per user request. User must always select profile.
+        /*
         const lastUserId = localStorage.getItem('lector_last_user_id');
         if (lastUserId) {
             const userToLogin = initialUsers.find(u => u.id === lastUserId);
             if (userToLogin) {
                 console.log("Auto-logging in user:", userToLogin.name);
-                // No auto-read URL at this stage. Logic moved to separate useEffect.
                 performLogin(userToLogin, false); 
             }
         }
+        */
     };
     loadAllUsers();
 

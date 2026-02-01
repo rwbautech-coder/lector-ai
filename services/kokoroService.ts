@@ -1,5 +1,10 @@
 import { KokoroTTS } from "kokoro-js";
 import { createWavBlob } from "../utils/audioUtils";
+import { env } from "onnxruntime-web";
+
+// Configure ONNX Runtime for compatibility (GitHub Pages lacks COOP/COEP headers for threads)
+env.wasm.numThreads = 1; // Force single-threaded execution
+env.wasm.proxy = false;  // Disable proxy worker to avoid cross-origin issues on iOS
 
 // Singleton instance
 let tts: KokoroTTS | null = null;
