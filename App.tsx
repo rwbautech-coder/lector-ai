@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Upload, FileText, AlertCircle, BookOpen, Clock, X, Cloud, LogOut, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, List, Download, Link as LinkIcon, Globe } from 'lucide-react';
 import { AVAILABLE_VOICES, TextChunk, ReaderState, UserProfile, PREDEFINED_USERS, Book, AppSettings, Page, Chapter } from './types';
 import { generateSpeechKokoro, initKokoro } from './services/kokoroService';
+import { generateSpeechPiper, initPiper } from './services/piperService';
 import { chunkText, organizePages } from './utils/audioUtils';
 import { extractTextFromPdf } from './utils/pdfUtils';
 import { detectLanguage } from './utils/textUtils';
@@ -332,18 +333,11 @@ export default function App() {
     // Initial theme setting now comes from user profile after login
     getSettings().then(setConfig);
     
-    // Detect Mobile Device
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    
-    if (isMobile) {
-        console.log("Mobile device detected. Switching to System TTS for stability.");
-        setIsUsingSystemTTS(true);
-    } else {
-        // Start warming up the AI Model (Kokoro) only on Desktop
-        setTimeout(() => {
-            initKokoro().catch(err => console.error("Failed to warm up Kokoro:", err));
-        }, 1000);
-    }
+    // Start warming up models
+    setTimeout(() => {
+        initKokoro().catch(e => console.log("Kokoro init deferred/failed", e));
+        initPiper().catch(e => console.log("Piper init deferred/failed", e));
+    }, 1000);
 
     // PWA Install Event Listener
 
@@ -464,7 +458,21 @@ export default function App() {
     try {
         if (index === currentChunkIndex) setIsApiLoading(true);
 
-        const wavBlob = await generateSpeechKokoro(chunkToCheck.text, selectedVoice);
+        const lang = detectLanguage(chunkToCheck.text);
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        
+        let wavBlob: Blob;
+
+        if (lang === 'pl') {
+             wavBlob = await generateSpeechPiper(chunkToCheck.text, 'pl');
+        } else if (isMobile) {
+             // Piper is lighter and safer on mobile for now
+             wavBlob = await generateSpeechPiper(chunkToCheck.text, 'en');
+        } else {
+             // Use Kokoro on desktop for English (better quality)
+             wavBlob = await generateSpeechKokoro(chunkToCheck.text, selectedVoice);
+        }
+
         const audioUrl = URL.createObjectURL(wavBlob);
 
         setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'ready', audioUrl } : c));
