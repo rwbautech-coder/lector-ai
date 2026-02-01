@@ -482,7 +482,7 @@ export default function App() {
     nextChunkRef.current = nextChunk;
   }, [nextChunk]);
 
-  const triggerSync = async (userId: string) => {
+  const bufferChunk = useCallback(async (index: number) => {
     if (index >= chunks.length || index < 0) return;
     
     if (isUsingSystemTTS) {
