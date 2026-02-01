@@ -51,6 +51,9 @@ export default function App() {
   // --- REFS ---
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isPlayingRef = useRef<boolean>(false);
+  // System TTS Ref
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const [isUsingSystemTTS, setIsUsingSystemTTS] = useState<boolean>(false);
   
   // Track PWA install prompt
   const [installPrompt, setInstallPrompt] = useState<any>(null);
@@ -125,16 +128,6 @@ export default function App() {
         setUsers(initialUsers);
 
         // Auto-login removed per user request. User must always select profile.
-        /*
-        const lastUserId = localStorage.getItem('lector_last_user_id');
-        if (lastUserId) {
-            const userToLogin = initialUsers.find(u => u.id === lastUserId);
-            if (userToLogin) {
-                console.log("Auto-logging in user:", userToLogin.name);
-                performLogin(userToLogin, false); 
-            }
-        }
-        */
     };
     loadAllUsers();
 
@@ -243,11 +236,17 @@ export default function App() {
         }
     }
 
-  }, [currentChunkIndex, chunks, selectedVoice]);
+  }, [currentChunkIndex, chunks, selectedVoice, isUsingSystemTTS]);
   
   const bufferChunk = useCallback(async (index: number) => {
     if (index >= chunks.length || index < 0) return;
     
+    // If using system TTS, we don't need to buffer audio files. Just mark as ready.
+    if (isUsingSystemTTS) {
+       setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'ready' } : c));
+       return;
+    }
+
     const chunkToCheck = chunks[index];
     if (!chunkToCheck) return;
 
@@ -266,338 +265,65 @@ export default function App() {
         setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'ready', audioUrl } : c));
     } catch (err) {
         console.error(`Error buffering chunk ${index}`, err);
-        if (index === currentChunkIndex) {
-             setError("Failed to generate audio.");
-        }
-        setChunks(prev => prev.map((c, i) => i === index ? { ...c, status: 'error' } : c));
+        // Fallback to System TTS on failure
+        console.warn("Kokoro failed, switching to System TTS fallback.");
+        setIsUsingSystemTTS(true);
+        setError(null); // Clear error as we have a backup
+        // Mark current and future as ready (since system TTS doesn't need buffering)
+        setChunks(prev => prev.map((c, i) => i >= index ? { ...c, status: 'ready' } : c));
     } finally {
         if (index === currentChunkIndex) setIsApiLoading(false);
     }
 
-  }, [chunks, selectedVoice, currentChunkIndex]);
+  }, [chunks, selectedVoice, currentChunkIndex, isUsingSystemTTS]);
 
-  // --- USER LOGIC ---
-
-  const handleLogin = (user: UserProfile) => {
-    performLogin(user, false);
-  };
-
-  const handleAddUser = (name: string) => {
-    const newUser: UserProfile = {
-      id: Date.now().toString(),
-      name,
-      avatarColor: 'bg-indigo-500',
-      playbackSpeed: 1.0, // Default for new users
-      selectedVoice: 'Kore', // Default for new users
-      isDarkMode: true // Default for new users
-    };
-    setUsers([...users, newUser]);
-    saveUser(newUser); // Save new user to DB
-  };
-
-  const connectGoogle = () => {
-     handleGoogleLogin();
-  };
-
-  const triggerSync = async (userId: string) => {
-     if (!isDriveConnected) return;
-     setIsSyncing(true);
-     try {
-       const localBooks = await getBooksForUser(userId);
-       const syncedBooks = await syncBooksWithDrive(localBooks);
-       for (const b of syncedBooks) {
-         await saveBookToLocal(userId, b);
-       }
-       setMyBooks(syncedBooks);
-     } catch (e) {
-       console.error("Sync failed", e);
-     } finally {
-       setIsSyncing(false);
-     }
-  };
-
-  const handleInstallClick = () => {
-    if (installPrompt) {
-      installPrompt.prompt();
-      installPrompt.userChoice.then((choiceResult: any) => {
-        setInstallPrompt(null);
-      });
-    }
-  };
-
-  // --- BOOK LOGIC ---
-
-  const processContent = async (text: string, title: string, autoPlay: boolean = false) => {
-      if (!currentUser) return;
-      
-      const lang = detectLanguage(text);
-      if (lang === 'pl') {
-          setError("⚠️ Detected Polish text. Kokoro TTS supports only English and may read with a strong accent.");
-      }
-      
-      const newBook: Book = {
-         id: `${title.substring(0, 20).replace(/\s+/g, '_')}_${Date.now()}`,
-         title: title,
-         content: text,
-         lastRead: Date.now(),
-         currentChunkIndex: 0,
-         totalChunks: 0, 
-         lastModified: Date.now()
-      };
-      
-      await saveBookToLocal(currentUser.id, newBook);
-      setMyBooks(prev => [newBook, ...prev]);
-      if (isDriveConnected) saveBookToDrive(newBook);
-
-      loadBook(newBook, autoPlay);
-  };
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !currentUser) return;
-    
-    setIsProcessingFile(true);
-    setError(null);
-
-    try {
-      let text = '';
-      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        text = await extractTextFromPdf(file);
-      } else {
-        text = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.readAsText(file);
-        });
-      }
-
-      if (!text || text.trim().length === 0) {
-        throw new Error("Could not extract text from this file.");
-      }
-
-      await processContent(text, file.name.replace(/\.(txt|pdf)$/i, ''));
-
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to process file.");
-    } finally {
-      setIsProcessingFile(false);
-    }
-  };
-
-  // Reusable function for importing from URL with Proxy support
-  const importContentFromUrl = async (url: string, autoPlay: boolean = false) => {
-    if (!url.trim() || !currentUser) return;
-    
-    setIsProcessingFile(true);
-    setError(null);
-    setShowUrlInput(false);
-
-    try {
-      let response;
-      let usedUrl = url;
-      
-      try {
-          // Try direct fetch first
-          response = await fetch(url);
-          if (!response.ok) throw new Error("Direct fetch failed");
-      } catch (directError) {
-          console.log("Direct fetch failed or blocked by CORS. Trying Proxy...");
-          // Fallback to AllOrigins proxy for text/plain content
-          usedUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-          response = await fetch(usedUrl);
-      }
-
-      if (!response.ok) throw new Error(`Failed to fetch URL: ${response.statusText}`);
-      
-      const contentType = response.headers.get('content-type') || '';
-      const blob = await response.blob();
-      let text = '';
-      
-      // Determine filename from original URL
-      let filename = url.split('/').pop() || 'Downloaded Content';
-      if (filename.includes('?')) filename = filename.split('?')[0];
-      if (filename.length > 30) filename = filename.substring(0, 30);
-      filename = decodeURIComponent(filename);
-
-      if (contentType.includes('pdf') || url.toLowerCase().endsWith('.pdf')) {
-        text = await extractTextFromPdf(blob);
-      } else {
-        text = await blob.text();
-      }
-
-      if (!text || text.trim().length === 0) {
-        throw new Error("Content appears empty or unsupported format.");
-      }
-
-      await processContent(text, filename, autoPlay);
-
-    } catch (err: any) {
-      console.error(err);
-      setError(`Import failed: ${err.message}. If the link is private or blocks proxies, please download the file and upload it manually.`);
-      setShowLibrary(true);
-    } finally {
-      setIsProcessingFile(false);
-    }
-  };
-
-  const handleUrlInputSubmit = async () => {
-    await importContentFromUrl(urlInput);
-    setUrlInput('');
-  };
-
-  const loadBook = (book: Book, autoPlay: boolean = false) => {
-      setCurrentBook(book);
-      
-      const rawChunks = chunkText(book.content, 500);
-      const textChunks: TextChunk[] = rawChunks.map((t, i) => ({
-          id: i,
-          text: t,
-          status: 'pending'
-      }));
-      setChunks(textChunks);
-
-      const { pages, chapters } = organizePages(textChunks);
-      setPages(pages);
-      setChapters(chapters);
-
-      const startChunk = book.currentChunkIndex || 0;
-      setCurrentChunkIndex(startChunk);
-      
-      const initialPage = pages.findIndex(p => startChunk >= p.startChunkIndex && startChunk <= p.endChunkIndex);
-      setCurrentPageIndex(initialPage !== -1 ? initialPage : 0);
-
-      setShowLibrary(false);
-      setShowChapters(false);
-
-      if (audioRef.current) {
-          audioRef.current.pause();
-          isPlayingRef.current = false;
-      }
-
-      if (autoPlay) {
-        // Allow a small tick for state to settle
-        setTimeout(() => {
-            setReaderState(ReaderState.PLAYING);
-            isPlayingRef.current = true;
-            // This will trigger the useEffect that calls playCurrentChunk
-        }, 800);
-      } else {
-        setReaderState(ReaderState.IDLE);
-      }
-  };
-
-  // Sync Page with Chunk
-  useEffect(() => {
-     if (pages.length === 0) return;
-     const currentPage = pages[currentPageIndex];
-     
-     if (currentChunkIndex < currentPage.startChunkIndex || currentChunkIndex > currentPage.endChunkIndex) {
-         const newPageIndex = pages.findIndex(p => currentChunkIndex >= p.startChunkIndex && currentChunkIndex <= p.endChunkIndex);
-         if (newPageIndex !== -1) setCurrentPageIndex(newPageIndex);
-     }
-  }, [currentChunkIndex, pages]); 
-
-  const updateProgress = async (index: number) => {
-     if (!currentUser || !currentBook) return;
-     
-     const updatedBook = {
-        ...currentBook,
-        currentChunkIndex: index,
-        lastRead: Date.now(),
-        lastModified: Date.now()
-     };
-     setCurrentBook(updatedBook);
-     await saveBookToLocal(currentUser.id, updatedBook);
-  };
-  
-  const saveProgressToCloud = async () => {
-     if (isDriveConnected && currentBook && currentUser) {
-         await saveBookToDrive(currentBook);
-     }
-  };
-
-  // --- NAVIGATION ---
-
-  const changePage = (offset: number) => {
-      const newIndex = Math.max(0, Math.min(pages.length - 1, currentPageIndex + offset));
-      if (newIndex !== currentPageIndex) {
-          if (audioRef.current) audioRef.current.pause();
-          isPlayingRef.current = false;
-          setReaderState(ReaderState.IDLE);
-
-          setCurrentPageIndex(newIndex);
-          const firstChunkOfPage = pages[newIndex].startChunkIndex;
-          setCurrentChunkIndex(firstChunkOfPage);
-          updateProgress(firstChunkOfPage);
-      }
-  };
-
-  const jumpToChapter = (chapter: Chapter) => {
-      if (audioRef.current) audioRef.current.pause();
-      isPlayingRef.current = false;
-      setReaderState(ReaderState.IDLE);
-
-      setCurrentPageIndex(chapter.pageIndex);
-      setCurrentChunkIndex(chapter.chunkIndex);
-      updateProgress(chapter.chunkIndex);
-      setShowChapters(false);
-  };
-
-
-  // --- AUDIO ENGINE ---
-  const initAudio = () => {
-    if (!audioRef.current) {
-      audioRef.current = new Audio();
-      audioRef.current.preservesPitch = true;
-      audioRef.current.onended = () => {
-        if (isPlayingRef.current) nextChunk();
-      };
-      audioRef.current.onerror = () => {
-        handleChunkComplete();
-      };
-    }
-  };
-
-  const handleChunkComplete = useCallback(() => {
-     setChunks(prev => {
-        const nextIndex = currentChunkIndex + 1;
-        if (nextIndex < prev.length) {
-           setCurrentChunkIndex(nextIndex);
-        } else {
-           setReaderState(ReaderState.IDLE);
-           isPlayingRef.current = false;
-           saveProgressToCloud(); 
-        }
-        return prev;
-     });
-  }, [currentChunkIndex]); 
-
-  const nextChunk = () => {
-    setCurrentChunkIndex(prev => {
-        const next = prev + 1;
-        if (next >= chunks.length) {
-            setReaderState(ReaderState.IDLE);
-            isPlayingRef.current = false;
-            saveProgressToCloud();
-            return prev;
-        }
-        updateProgress(next);
-        return next;
-    });
-  };
+  // --- PLAYBACK LOGIC ---
 
   const playCurrentChunk = useCallback(async () => {
     const chunk = chunks[currentChunkIndex];
     if (!chunk) return;
 
+    // --- SYSTEM TTS PLAYBACK ---
+    if (isUsingSystemTTS || !chunk.audioUrl) {
+        // Cancel any ongoing system speech
+        window.speechSynthesis.cancel();
+
+        const utterance = new SpeechSynthesisUtterance(chunk.text);
+        utterance.rate = playbackSpeed;
+        
+        // Try to select a voice matching the language (PL or EN)
+        const voices = window.speechSynthesis.getVoices();
+        const lang = detectLanguage(chunk.text);
+        // Simple voice selection heuristic
+        const voice = voices.find(v => v.lang.startsWith(lang === 'pl' ? 'pl' : 'en'));
+        if (voice) utterance.voice = voice;
+
+        utterance.onend = () => {
+            if (isPlayingRef.current) {
+                nextChunk();
+            }
+        };
+        utterance.onerror = (e) => {
+            console.error("System TTS Error:", e);
+            // Ignore interruption errors
+            if (e.error !== 'interrupted') {
+                 setIsPlayingRef(false); // Stop on real error
+                 setReaderState(ReaderState.IDLE);
+            }
+        };
+
+        utteranceRef.current = utterance;
+        window.speechSynthesis.speak(utterance);
+        
+        setReaderState(ReaderState.PLAYING);
+        setIsPlayingRef(true);
+        setChunks(prev => prev.map((c, i) => i === currentChunkIndex ? { ...c, status: 'playing' } : c));
+        return;
+    }
+
+    // --- KOKORO/AUDIO FILE PLAYBACK ---
     initAudio();
     const audio = audioRef.current!;
-
-    if (!chunk.audioUrl) {
-      if (chunk.status === 'pending') bufferChunk(currentChunkIndex);
-      return;
-    }
 
     if (audio.src !== chunk.audioUrl) {
         audio.src = chunk.audioUrl;
@@ -610,16 +336,21 @@ export default function App() {
         console.log(`[Audio] Attempting to play chunk ${currentChunkIndex}:`, chunk.audioUrl);
         await audio.play();
         setReaderState(ReaderState.PLAYING);
-        isPlayingRef.current = true;
+        setIsPlayingRef(true);
         setChunks(prev => prev.map((c, i) => i === currentChunkIndex ? { ...c, status: 'playing' } : c));
     } catch (e) {
-        console.warn("Auto-play blocked by browser or failed", e);
-        setReaderState(ReaderState.PAUSED);
-        isPlayingRef.current = false;
-        // Inform user if this was an auto-play attempt that got blocked
-        setError("Auto-play blocked by browser. Please click Play to start.");
+        console.warn("Auto-play blocked or audio failed", e);
+        // Fallback to System TTS if audio file fails to play
+        console.warn("Audio file playback failed, switching to System TTS.");
+        setIsUsingSystemTTS(true);
+        playCurrentChunk(); // Retry with system TTS immediately
     }
-  }, [chunks, currentChunkIndex, playbackSpeed, bufferChunk]);
+  }, [chunks, currentChunkIndex, playbackSpeed, bufferChunk, isUsingSystemTTS]);
+
+  // Helper to update ref state (since we use it in callbacks)
+  const setIsPlayingRef = (val: boolean) => {
+      isPlayingRef.current = val;
+  }
 
   useEffect(() => {
     if (isPlayingRef.current && chunks[currentChunkIndex]?.status === 'ready') {
@@ -633,22 +364,61 @@ export default function App() {
 
   const togglePlay = () => {
     if (readerState === ReaderState.PLAYING) {
-       if (audioRef.current) audioRef.current.pause();
-       isPlayingRef.current = false;
+       // PAUSE
+       if (isUsingSystemTTS) {
+           window.speechSynthesis.cancel(); // System TTS pause is flaky, cancel is safer for chunk-based logic
+       } else {
+           if (audioRef.current) audioRef.current.pause();
+       }
+       setIsPlayingRef(false);
        setReaderState(ReaderState.PAUSED);
        saveProgressToCloud(); 
     } else {
-       // Clear any auto-play errors when user manually interacts
-       if (error && error.includes("Auto-play")) setError(null);
-       
-       isPlayingRef.current = true;
+       // PLAY
+       setIsPlayingRef(true);
        setReaderState(ReaderState.PLAYING);
-       if (chunks[currentChunkIndex]?.status === 'ready') {
+       
+       if (isUsingSystemTTS) {
            playCurrentChunk();
-       } else if (chunks[currentChunkIndex]?.status === 'pending') {
-           bufferChunk(currentChunkIndex);
+       } else {
+           if (chunks[currentChunkIndex]?.status === 'ready') {
+               playCurrentChunk();
+           } else if (chunks[currentChunkIndex]?.status === 'pending') {
+               bufferChunk(currentChunkIndex);
+           }
        }
     }
+  };
+
+  // ... (Audio Engine helpers handleChunkComplete, nextChunk remain mostly same, but need to check isUsingSystemTTS)
+  // Actually nextChunk uses isPlayingRef.current which we manage.
+  
+  const handleChunkComplete = useCallback(() => {
+     setChunks(prev => {
+        const nextIndex = currentChunkIndex + 1;
+        if (nextIndex < prev.length) {
+           setCurrentChunkIndex(nextIndex);
+        } else {
+           setReaderState(ReaderState.IDLE);
+           setIsPlayingRef(false);
+           saveProgressToCloud(); 
+        }
+        return prev;
+     });
+  }, [currentChunkIndex]); 
+
+  const nextChunk = () => {
+    setCurrentChunkIndex(prev => {
+        const next = prev + 1;
+        if (next >= chunks.length) {
+            setReaderState(ReaderState.IDLE);
+            setIsPlayingRef(false);
+            saveProgressToCloud();
+            return prev;
+        }
+        updateProgress(next);
+        return next;
+    });
   };
 
 
@@ -937,8 +707,12 @@ export default function App() {
                                             return;
                                         }
                                         if (globalIndex !== currentChunkIndex) {
-                                            if (audioRef.current) audioRef.current.pause();
-                                            isPlayingRef.current = false;
+                                            if (isUsingSystemTTS) {
+                                                window.speechSynthesis.cancel();
+                                            } else {
+                                                if (audioRef.current) audioRef.current.pause();
+                                            }
+                                            setIsPlayingRef(false);
                                             setReaderState(ReaderState.IDLE);
                                             setCurrentChunkIndex(globalIndex);
                                         }
