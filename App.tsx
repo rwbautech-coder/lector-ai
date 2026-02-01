@@ -60,6 +60,10 @@ export default function App() {
 
   // --- HELPER FUNCTIONS (DEFINED BEFORE USE) ---
 
+  const setIsPlayingRef = (val: boolean) => {
+      isPlayingRef.current = val;
+  };
+
   const saveProgressToCloud = async () => {
      if (isDriveConnected && currentBook && currentUser) {
          await saveBookToDrive(currentBook);
@@ -104,9 +108,8 @@ export default function App() {
         if (isPlayingRef.current) nextChunk();
       };
       audioRef.current.onerror = () => {
-        // Handle error by stopping or skipping
         console.error("Audio playback error");
-        setIsPlayingRef.current = false;
+        setIsPlayingRef(false);
         setReaderState(ReaderState.IDLE);
       };
     }
@@ -148,6 +151,31 @@ export default function App() {
     }
   };
 
+  const changePage = (offset: number) => {
+      const newIndex = Math.max(0, Math.min(pages.length - 1, currentPageIndex + offset));
+      if (newIndex !== currentPageIndex) {
+          if (audioRef.current) audioRef.current.pause();
+          setIsPlayingRef(false);
+          setReaderState(ReaderState.IDLE);
+
+          setCurrentPageIndex(newIndex);
+          const firstChunkOfPage = pages[newIndex].startChunkIndex;
+          setCurrentChunkIndex(firstChunkOfPage);
+          updateProgress(firstChunkOfPage);
+      }
+  };
+
+  const jumpToChapter = (chapter: Chapter) => {
+      if (audioRef.current) audioRef.current.pause();
+      setIsPlayingRef(false);
+      setReaderState(ReaderState.IDLE);
+
+      setCurrentPageIndex(chapter.pageIndex);
+      setCurrentChunkIndex(chapter.chunkIndex);
+      updateProgress(chapter.chunkIndex);
+      setShowChapters(false);
+  };
+
   const loadBook = (book: Book, autoPlay: boolean = false) => {
       setCurrentBook(book);
       
@@ -174,13 +202,13 @@ export default function App() {
 
       if (audioRef.current) {
           audioRef.current.pause();
-          isPlayingRef.current = false;
+          setIsPlayingRef(false);
       }
 
       if (autoPlay) {
         setTimeout(() => {
             setReaderState(ReaderState.PLAYING);
-            isPlayingRef.current = true;
+            setIsPlayingRef(true);
         }, 800);
       } else {
         setReaderState(ReaderState.IDLE);
@@ -210,6 +238,39 @@ export default function App() {
       if (isDriveConnected) saveBookToDrive(newBook);
 
       loadBook(newBook, autoPlay);
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !currentUser) return;
+    
+    setIsProcessingFile(true);
+    setError(null);
+
+    try {
+      let text = '';
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        text = await extractTextFromPdf(file);
+      } else {
+        text = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsText(file);
+        });
+      }
+
+      if (!text || text.trim().length === 0) {
+        throw new Error("Could not extract text from this file.");
+      }
+
+      await processContent(text, file.name.replace(/\.(txt|pdf)$/i, ''));
+
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to process file.");
+    } finally {
+      setIsProcessingFile(false);
+    }
   };
 
   const importContentFromUrl = async (url: string, autoPlay: boolean = false) => {
@@ -366,7 +427,7 @@ export default function App() {
         const next = prev + 1;
         if (next >= chunks.length) {
             setReaderState(ReaderState.IDLE);
-            isPlayingRef.current = false;
+            setIsPlayingRef(false);
             saveProgressToCloud();
             return prev;
         }
@@ -459,7 +520,7 @@ export default function App() {
         utterance.onerror = (e) => {
             console.error("System TTS Error:", e);
             if (e.error !== 'interrupted') {
-                 isPlayingRef.current = false;
+                 setIsPlayingRef(false);
                  setReaderState(ReaderState.IDLE);
             }
         };
@@ -468,7 +529,7 @@ export default function App() {
         window.speechSynthesis.speak(utterance);
         
         setReaderState(ReaderState.PLAYING);
-        isPlayingRef.current = true;
+        setIsPlayingRef(true);
         setChunks(prev => prev.map((c, i) => i === currentChunkIndex ? { ...c, status: 'playing' } : c));
         return;
     }
@@ -488,13 +549,18 @@ export default function App() {
         console.log(`[Audio] Attempting to play chunk ${currentChunkIndex}:`, chunk.audioUrl);
         await audio.play();
         setReaderState(ReaderState.PLAYING);
-        isPlayingRef.current = true;
+        setIsPlayingRef(true);
         setChunks(prev => prev.map((c, i) => i === currentChunkIndex ? { ...c, status: 'playing' } : c));
     } catch (e) {
         console.warn("Auto-play blocked or audio failed", e);
         console.warn("Audio file playback failed, switching to System TTS.");
         setIsUsingSystemTTS(true);
-        playCurrentChunk(); 
+        // Avoid infinite loop if switch happens inside play call; check isUsingSystemTTS again in recursive call
+        // But since we just set state, we can't retry immediately in same closure.
+        // Let user or next effect trigger it. Or better: manually trigger system speech here.
+        // For simplicity, let's just let the state update handle the next attempt (or user click).
+        // Actually, let's try to recover instantly.
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(chunk.text)); // Quick fallback
     }
   }, [chunks, currentChunkIndex, playbackSpeed, bufferChunk, isUsingSystemTTS]);
 
@@ -511,11 +577,11 @@ export default function App() {
        } else {
            if (audioRef.current) audioRef.current.pause();
        }
-       isPlayingRef.current = false;
+       setIsPlayingRef(false);
        setReaderState(ReaderState.PAUSED);
        saveProgressToCloud(); 
     } else {
-       isPlayingRef.current = true;
+       setIsPlayingRef(true);
        setReaderState(ReaderState.PLAYING);
        
        if (isUsingSystemTTS) {
@@ -841,7 +907,7 @@ export default function App() {
                                             } else {
                                                 if (audioRef.current) audioRef.current.pause();
                                             }
-                                            setIsPlayingRef.current = false;
+                                            setIsPlayingRef(false);
                                             setReaderState(ReaderState.IDLE);
                                             setCurrentChunkIndex(globalIndex);
                                         }
