@@ -1,7 +1,7 @@
 import { Book, UserProfile, AppSettings } from '../types';
 
 const DB_NAME = 'LectorAI_DB';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Incremented to ensure 'users' store is created
 
 export const initDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
